@@ -142,30 +142,71 @@ impl LinuxMonitor {
         }
     }
 
-    /// Gets home directories of real users, handling both local and remote user databases
+    /// Get all users from the system database without any filtering
+    /// Returns vector of (UID, home_directory) tuples
+    fn get_all_user_homes(&self) -> Vec<(u32, PathBuf)> {
+        let mut users = Vec::new();
+
+        unsafe {
+            // Reset to start of user database
+            libc::setpwent();
+
+            // Iterate through all users in the database
+            loop {
+                let pwd_ptr = libc::getpwent();
+                if pwd_ptr.is_null() {
+                    break;
+                }
+
+                let pwd = &*pwd_ptr;
+                let uid = pwd.pw_uid;
+
+                // Get home directory path
+                if !pwd.pw_dir.is_null() {
+                    let home_cstr = std::ffi::CStr::from_ptr(pwd.pw_dir);
+                    if let Ok(home_str) = home_cstr.to_str() {
+                        let home_path = PathBuf::from(home_str);
+                        if home_path.exists() {
+                            users.push((uid, home_path));
+                        }
+                    }
+                }
+            }
+
+            // Close the user database
+            libc::endpwent();
+        }
+
+        users
+    }
+
+    /// Gets home directories of all users from the system database
     fn get_system_users(&self) -> Vec<PathBuf> {
         let mut users = Vec::new();
 
-        // Check if system has large user database (likely LDAP/AD) by counting users
-        let total_user_count = self.count_total_users();
-        if total_user_count >= 500 {
-            log::info!(
-                "Large user database detected ({} users >= 500), using active process UIDs only",
-                total_user_count
-            );
-            users.extend(self.get_active_user_homes());
-        } else {
-            log::info!(
-                "Small user database detected ({} users < 500), reading all local users",
-                total_user_count
-            );
-            users.extend(self.get_local_users());
-        }
+        // Use getpwent() to get all users and count them
+        let all_user_homes = self.get_all_user_homes();
+        let total_user_count = all_user_homes.len();
 
-        // Always add root explicitly
-        let root_home = PathBuf::from("/root");
-        if root_home.exists() && !users.contains(&root_home) {
-            users.push(root_home);
+        if total_user_count >= 500 {
+            // Large database (likely LDAP/AD): only use users with active processes
+            log::info!(
+                "Large user database detected ({} users >= 500), filtering to active process UIDs only",
+                total_user_count
+            );
+            let active_uids = self.get_active_uids();
+            for (uid, home) in all_user_homes {
+                if active_uids.contains(&uid) {
+                    users.push(home);
+                }
+            }
+        } else {
+            // Small database: use all users
+            log::info!(
+                "Small user database detected ({} users < 500), using all users",
+                total_user_count
+            );
+            users.extend(all_user_homes.into_iter().map(|(_, home)| home));
         }
 
         // Sort and deduplicate
@@ -229,12 +270,24 @@ impl LinuxMonitor {
                     let uid: i32 = parts[2].parse().unwrap_or(-1);
                     let home = parts[5];
 
-                    // Monitor real user directories (UID >= 1000) or root (UID 0)
-                    if (uid >= 1000 || uid == 0) && home.starts_with('/') && home != "/" {
+                    // Monitor real user directories (UID >= 500) or root (UID 0)
+                    // UIDs 500+ cover most regular users (macOS starts at 501, many Linux at 500 or 1000)
+                    if (uid >= 500 || uid == 0) && home.starts_with('/') && home != "/" {
                         let home_path = PathBuf::from(home);
+                        log::debug!(
+                            "Checking user UID {} home: {} (exists: {})",
+                            uid,
+                            home,
+                            home_path.exists()
+                        );
                         if home_path.exists() {
+                            log::debug!("Adding user home: {}", home_path.display());
                             users.push(home_path);
+                        } else {
+                            log::debug!("Skipping non-existent home: {}", home_path.display());
                         }
+                    } else {
+                        log::debug!("Skipping user UID {} home: {} (filtered out)", uid, home);
                     }
                 }
             }
@@ -254,8 +307,9 @@ impl LinuxMonitor {
         );
 
         for uid in active_uids {
-            // Skip system UIDs (< 1000) except root (0)
-            if uid < 1000 && uid != 0 {
+            // Skip system UIDs (< 500) except root (0)
+            // UIDs 500+ cover most regular users
+            if uid < 500 && uid != 0 {
                 continue;
             }
 
