@@ -600,7 +600,7 @@ impl LinuxMonitor {
                 if len >= 24 {
                     let event_len = u32::from_ne_bytes([buffer[0], buffer[1], buffer[2], buffer[3]]);
                     let vers = buffer[4];
-                    let reserved = buffer[5];
+                    let _reserved = buffer[5];
                     let metadata_len = u16::from_ne_bytes([buffer[6], buffer[7]]);
                     let mask = u64::from_ne_bytes([
                         buffer[8], buffer[9], buffer[10], buffer[11],
