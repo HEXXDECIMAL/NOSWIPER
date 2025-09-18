@@ -623,7 +623,7 @@ impl LinuxMonitor {
             Err(e) => {
                 // Process may have already exited - this is normal for short-lived processes
                 log::warn!("Process PID {} already exited, allowing access: {}", metadata.pid, e);
-                // Allow the access since we can't verify the process
+                // IMPORTANT: Must respond BEFORE closing the fd
                 self.respond_to_event(metadata.fd, FAN_ALLOW)?;
                 unsafe { libc::close(metadata.fd) };
                 return Ok(());
@@ -763,6 +763,9 @@ impl LinuxMonitor {
             .fanotify_fd
             .ok_or_else(|| anyhow::anyhow!("Fanotify not initialized"))?;
 
+        log::debug!("Responding to fanotify: event_fd={}, response={}, fanotify_fd={}",
+            fd, if response == FAN_ALLOW { "ALLOW" } else { "DENY" }, fanotify_fd);
+
         let response = FanotifyResponse { fd, response };
 
         let ret = unsafe {
@@ -774,12 +777,16 @@ impl LinuxMonitor {
         };
 
         if ret < 0 {
+            let err = io::Error::last_os_error();
+            log::error!("Failed to write response: ret={}, err={}, fanotify_fd={}, event_fd={}",
+                ret, err, fanotify_fd, fd);
             return Err(anyhow::anyhow!(
                 "Failed to send fanotify response: {}",
-                io::Error::last_os_error()
+                err
             ));
         }
 
+        log::debug!("Successfully sent fanotify response");
         Ok(())
     }
 
