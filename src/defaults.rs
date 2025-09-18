@@ -218,6 +218,7 @@ pub const EXCLUDED_PATTERNS: &[&str] = &[
 ];
 
 /// Common paths for legitimate programs on macOS
+#[cfg(target_os = "macos")]
 pub const MACOS_COMMON_PATHS: &[&str] = &[
     // System binaries
     "/usr/bin/*",

@@ -2,11 +2,13 @@ use crate::cli::{Mechanism, Mode};
 use crate::config::Config;
 use crate::rules::{Decision, RuleEngine};
 use anyhow::Result;
+#[cfg(target_os = "macos")]
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
+#[cfg(target_os = "macos")]
 use tokio::io::{AsyncBufReadExt, BufReader};
 
 #[cfg(target_os = "macos")]
@@ -19,6 +21,7 @@ use crate::linux_monitor::LinuxMonitor;
 use crate::freebsd_monitor::FreeBSDMonitor;
 
 /// Cached information about a process
+#[cfg(target_os = "macos")]
 #[derive(Debug, Clone)]
 struct ProcessInfo {
     #[allow(dead_code)]
@@ -33,6 +36,7 @@ struct ProcessInfo {
     last_seen: Instant,
 }
 
+#[cfg(target_os = "macos")]
 impl ProcessInfo {
     fn new(pid: u32, path: PathBuf) -> Self {
         Self {
@@ -55,12 +59,15 @@ pub struct Monitor {
     mechanism: Mechanism,
     verbose: bool,
     stop_parent: bool,
+    #[cfg(target_os = "macos")]
     process_cache: HashMap<u32, ProcessInfo>,
+    #[cfg(target_os = "macos")]
     cache_ttl: Duration,
 }
 
 // These structs are for potential future use with typed JSON parsing
 // Currently we parse JSON dynamically for flexibility
+#[cfg(target_os = "macos")]
 #[allow(dead_code)]
 #[derive(Deserialize, Debug)]
 struct EsloggerEvent {
@@ -79,7 +86,9 @@ impl Monitor {
             mechanism,
             verbose,
             stop_parent,
+            #[cfg(target_os = "macos")]
             process_cache: HashMap::new(),
+            #[cfg(target_os = "macos")]
             cache_ttl: Duration::from_secs(300), // 5 minute TTL for process cache
         }
     }
@@ -346,6 +355,7 @@ impl Monitor {
         Ok(())
     }
 
+    #[cfg(target_os = "macos")]
     fn check_eslogger_available(&self) -> bool {
         // First check if eslogger exists
         let exists = Command::new("which")
@@ -363,6 +373,7 @@ impl Monitor {
         exists
     }
 
+    #[cfg(target_os = "macos")]
     fn parse_open_event(&self, json: &serde_json::Value) -> Result<Option<(PathBuf, PathBuf, Option<u32>, Option<u32>, Option<u32>, Option<String>)>> {
 
         // This function assumes it's already been verified as an open event
@@ -446,6 +457,7 @@ impl Monitor {
         )))
     }
 
+    #[cfg(target_os = "macos")]
     fn parse_exec_event(&self, json: &serde_json::Value) -> Result<Option<(PathBuf, Vec<String>, Option<u32>, Option<u32>, Option<u32>, Option<String>)>> {
         // Extract process executable path
         let process_path = json.get("event")
@@ -515,6 +527,7 @@ impl Monitor {
         )))
     }
 
+    #[cfg(target_os = "macos")]
     fn check_args_for_protected_paths(&self, args: &[String]) -> Option<PathBuf> {
         for arg in args {
             // Expand tilde in the argument
@@ -539,6 +552,7 @@ impl Monitor {
         None
     }
 
+    #[cfg(target_os = "macos")]
     async fn handle_exec_with_protected_path(
         &mut self,
         process_path: &Path,
@@ -555,10 +569,14 @@ impl Monitor {
 
         // Get code signing info (no longer need PID strings for simplified logs)
 
+        #[cfg(target_os = "macos")]
         let signer_info = signing_info
             .as_ref()
             .map(|s| format!(" [{}]", s))
             .unwrap_or_default();
+
+        #[cfg(not(target_os = "macos"))]
+        let signer_info = String::new();
 
         // Create process context for exec event checking
         use crate::process_context::ProcessContext;
@@ -777,6 +795,7 @@ impl Monitor {
         Ok(())
     }
 
+    #[cfg(target_os = "macos")]
     async fn handle_file_access_with_signing(
         &mut self,
         process_path: &Path,
@@ -793,10 +812,14 @@ impl Monitor {
         // Get code signing info (no longer need PID strings for simplified logs)
 
         // Use signing info from eslogger - NEVER access the binary!
+        #[cfg(target_os = "macos")]
         let signer_info = signing_info
             .as_ref()
             .map(|s| format!(" [{}]", s))
             .unwrap_or_default();
+
+        #[cfg(not(target_os = "macos"))]
+        let signer_info = String::new();
 
         // Log ALL file opens, not just protected ones
         let is_protected = self.rule_engine.is_protected_file(&real_file_path);
@@ -1089,6 +1112,7 @@ impl Monitor {
         Ok(())
     }
 
+    #[cfg(target_os = "macos")]
     fn normalize_path(&self, path: &Path) -> PathBuf {
         // Try to resolve symlinks to get the real path
         match path.canonicalize() {
@@ -1304,6 +1328,7 @@ impl Monitor {
     }
 
     /// Update the process cache with new information
+    #[cfg(target_os = "macos")]
     fn cache_process_info(&mut self,
         pid: u32,
         path: &Path,
@@ -1352,6 +1377,7 @@ impl Monitor {
     }
 
     /// Clean up old entries from the process cache
+    #[cfg(target_os = "macos")]
     fn cleanup_process_cache(&mut self) {
         let now = Instant::now();
         let before_size = self.process_cache.len();
@@ -1367,6 +1393,7 @@ impl Monitor {
     }
 
     /// Build a process tree using cached information first, falling back to ps if needed
+    #[cfg(target_os = "macos")]
     fn build_process_tree_from_cache(&self, pid: Option<u32>, ppid: Option<u32>,
         euid: Option<u32>, process_name: &str, args: &str, max_levels: usize) -> String {
 
