@@ -381,21 +381,19 @@ impl LinuxMonitor {
                 failed_watches
             );
 
-            // Log first 20 watched files for verification
+            // Log ALL watched files for verification
             let watched_paths = self.watched_paths
                 .lock()
                 .map_err(|e| anyhow::anyhow!("Mutex lock poisoned: {}", e))?;
             let mut watched_sorted = watched_paths.clone();
             watched_sorted.sort();
 
-            log::info!("Monitored credential files:");
-            for (i, path) in watched_sorted.iter().take(20).enumerate() {
-                log::info!("  {}: {}", i + 1, path.display());
+            log::info!("=== FINAL LIST OF MONITORED FILES ===");
+            for (i, path) in watched_sorted.iter().enumerate() {
+                log::info!("  Watch #{}: {}", i + 1, path.display());
             }
-
-            if watched_sorted.len() > 20 {
-                log::info!("  ... and {} more files", watched_sorted.len() - 20);
-            }
+            log::info!("=== END OF MONITORED FILES LIST ===");
+            log::info!("Total files being monitored: {}", watched_sorted.len());
         }
 
         Ok(())
@@ -514,6 +512,8 @@ impl LinuxMonitor {
 
         let mut buffer = vec![0u8; 8192];
 
+        log::info!("Starting fanotify monitor loop, watching for events on fd {}", fd);
+
         loop {
             // Read events from fanotify
             let len =
@@ -530,6 +530,8 @@ impl LinuxMonitor {
             if len == 0 {
                 continue;
             }
+
+            log::info!("Received fanotify event(s), {} bytes", len);
 
             // Process events
             let mut offset = 0;
@@ -551,11 +553,16 @@ impl LinuxMonitor {
     }
 
     async fn handle_event(&mut self, metadata: &FanotifyEventMetadata) -> Result<()> {
+        log::info!("Handling fanotify event for PID {} (mask: 0x{:x})", metadata.pid, metadata.mask);
+
         // Get the file path from the file descriptor
         let file_path = self.get_path_from_fd(metadata.fd)?;
 
+        log::info!("Event file path: {}", file_path.display());
+
         // Check if this is a protected file
         if !self.rule_engine.is_protected_file(&file_path) {
+            log::debug!("File is not protected, allowing access");
             // Allow and close fd
             self.respond_to_event(metadata.fd, FAN_ALLOW)?;
             unsafe { libc::close(metadata.fd) };
@@ -565,8 +572,8 @@ impl LinuxMonitor {
         // Get process information
         let process_path = self.get_process_path(metadata.pid)?;
 
-        log::debug!(
-            "File access detected: {} (PID {}) -> {}",
+        log::info!(
+            "PROTECTED FILE ACCESS: {} (PID {}) -> {}",
             process_path.display(),
             metadata.pid,
             file_path.display()
