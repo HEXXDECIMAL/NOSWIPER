@@ -384,10 +384,13 @@ protected_files:
   # macOS Keychain - Most permissive since many apps need it
   - pattern: "~/Library/Keychains/login.keychain-db"
     allow:
-      # Apple system processes
+      # Apple system processes (including WiFiAgent from /System)
       - app_id: "com.apple.*"
+        path_pattern: "/System/*"
 
       # Any legitimate app from standard app locations with ppid=1
+      - path_pattern: "/Applications/*.app/Contents/MacOS/*"
+        ppid: 1
       - path_pattern: "/Applications/*/*.app/Contents/MacOS/*"
         ppid: 1
       - path_pattern: "/System/Applications/*/*.app/Contents/MacOS/*"
