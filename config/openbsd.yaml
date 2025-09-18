@@ -48,6 +48,8 @@ protected_files:
       - base: "sshd"
       - base: "git"
       - base: "rsync"
+      # GitHub CLI
+      - base: "gh"
 
   # SSH Known Hosts (used for lateral movement/reconnaissance)
   - id: ssh_known_hosts
@@ -65,6 +67,11 @@ protected_files:
       - base: "rsync"
       # Zsh (reads known_hosts for tab completion)
       - base: "zsh"
+      # Mobile shell (SSH replacement)
+      - base: "mosh"
+      - base: "mosh-client"
+      # Persistent SSH
+      - base: "autossh"
 
   # AWS Credentials
   - id: aws_credentials
@@ -282,6 +289,9 @@ protected_files:
       - base: "ksh"  # OpenBSD's default shell
       - base: "csh"
       - base: "tcsh"
+      # Terminal multiplexers might save/restore sessions
+      - base: "tmux"
+      - base: "screen"
 
   # OpenBSD package database
   - pattern: "/var/db/pkg/*"

@@ -50,6 +50,11 @@ protected_files:
       - base: "sshd"
       - base: "git"
       - base: "rsync"
+      # GitHub CLI from Linuxbrew (versioned paths)
+      - base: "gh"
+        path_pattern: "/home/linuxbrew/.linuxbrew/Cellar/gh/*/bin/*"
+      - base: "gh"
+        path_pattern: "~/.linuxbrew/Cellar/gh/*/bin/*"
 
   # SSH Known Hosts (used for lateral movement/reconnaissance)
   - id: ssh_known_hosts
@@ -808,6 +813,14 @@ default_base_paths:
   - /nix/store/*/bin  # Nix packages
   - /run/current-system/sw/bin  # NixOS system packages
   - ~/.nix-profile/bin  # User nix packages
+  - /home/linuxbrew/.linuxbrew/bin  # Linuxbrew
+  - /home/linuxbrew/.linuxbrew/sbin
+  - /home/linuxbrew/.linuxbrew/Cellar/*/bin
+  - /home/linuxbrew/.linuxbrew/Cellar/*/sbin
+  - ~/.linuxbrew/bin  # User Linuxbrew
+  - ~/.linuxbrew/sbin
+  - ~/.linuxbrew/Cellar/*/bin
+  - ~/.linuxbrew/Cellar/*/sbin
 
 # Monitoring configuration
 monitoring:

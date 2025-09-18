@@ -48,6 +48,8 @@ protected_files:
       - base: "sshd"
       - base: "git"
       - base: "rsync"
+      # GitHub CLI
+      - base: "gh"
 
   # SSH Known Hosts (used for lateral movement/reconnaissance)
   - id: ssh_known_hosts
@@ -63,6 +65,11 @@ protected_files:
       - base: "rsync"
       # Zsh (reads known_hosts for tab completion)
       - base: "zsh"
+      # Mobile shell (SSH replacement)
+      - base: "mosh"
+      - base: "mosh-client"
+      # Persistent SSH
+      - base: "autossh"
 
   # AWS Credentials
   - id: aws_credentials
@@ -262,7 +269,10 @@ protected_files:
       - base: "zsh"
       - base: "fish"
       - base: "sh"
-      - base: "ksh"  # Korn shell
+      - base: "ksh"
+      # Terminal multiplexers might save/restore sessions
+      - base: "tmux"
+      - base: "screen"  # Korn shell
       - base: "csh"
       - base: "tcsh"
 
