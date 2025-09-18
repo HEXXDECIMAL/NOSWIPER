@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use std::io;
 use std::mem;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 // Fanotify constants not in nix crate - only keep the ones we actually use
 const FAN_OPEN_PERM: u64 = 0x00010000;
@@ -46,7 +47,6 @@ pub struct FanotifyResponse {
     pub response: u32,
 }
 
-#[derive(Clone)]
 pub struct LinuxMonitor {
     rule_engine: RuleEngine,
     mode: Mode,
@@ -55,7 +55,7 @@ pub struct LinuxMonitor {
     #[allow(dead_code)] // Will be used for parent process stopping
     stop_parent: bool,
     fanotify_fd: Option<i32>,
-    watched_paths: Vec<PathBuf>,
+    watched_paths: Arc<Mutex<Vec<PathBuf>>>,
     pid_cache: HashMap<i32, PathBuf>,
 }
 
@@ -70,7 +70,7 @@ impl LinuxMonitor {
             verbose,
             stop_parent,
             fanotify_fd: None,
-            watched_paths: vec![],
+            watched_paths: Arc::new(Mutex::new(Vec::new())),
             pid_cache: HashMap::new(),
         }
     }
@@ -316,8 +316,15 @@ impl LinuxMonitor {
         // Add protected files to monitor
         self.add_watched_files()?;
 
-        // Note: Periodic file refresh would need more complex shared state management
-        // For now, we do initial discovery which is a major improvement over hardcoded paths
+        // Start background task for periodic file discovery
+        let watched_paths_clone = Arc::clone(&self.watched_paths);
+        let rule_engine_clone = self.rule_engine.clone();
+        let fanotify_fd = self.fanotify_fd;
+
+        tokio::spawn(async move {
+            Self::periodic_file_discovery(watched_paths_clone, rule_engine_clone, fanotify_fd)
+                .await;
+        });
 
         // Start monitoring loop
         self.monitor_loop().await
@@ -364,7 +371,7 @@ impl LinuxMonitor {
             }
 
             if self.add_file_watch(fd, file_path)? {
-                self.watched_paths.push(file_path.clone());
+                self.watched_paths.lock().unwrap().push(file_path.clone());
                 successful_watches += 1;
             } else {
                 failed_watches += 1;
@@ -382,7 +389,8 @@ impl LinuxMonitor {
         );
 
         // Log first 20 watched files for verification
-        let mut watched_sorted = self.watched_paths.clone();
+        let watched_paths = self.watched_paths.lock().unwrap();
+        let mut watched_sorted = watched_paths.clone();
         watched_sorted.sort();
 
         log::info!("Sample of monitored files:");
@@ -430,33 +438,60 @@ impl LinuxMonitor {
         Ok(true)
     }
 
-    /// Periodically refreshes file watches to catch newly created protected files
-    async fn periodic_file_refresh(self) {
+    /// Periodically discovers and adds watches for newly created protected files
+    async fn periodic_file_discovery(
+        watched_paths: Arc<Mutex<Vec<PathBuf>>>,
+        rule_engine: RuleEngine,
+        fanotify_fd: Option<i32>,
+    ) {
         let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(60)); // Check every minute
 
         loop {
             interval.tick().await;
 
-            // Discover any new protected files
-            let current_files = self.get_protected_file_paths();
-            let mut new_files = Vec::new();
+            if let Some(fd) = fanotify_fd {
+                // Create a temporary monitor instance to access discovery methods
+                let temp_monitor = LinuxMonitor {
+                    rule_engine: rule_engine.clone(),
+                    mode: Mode::Monitor, // Doesn't matter for discovery
+                    verbose: false,
+                    stop_parent: false,
+                    fanotify_fd: Some(fd),
+                    watched_paths: Arc::clone(&watched_paths),
+                    pid_cache: HashMap::new(),
+                };
 
-            for file_path in current_files {
-                if !self.watched_paths.contains(&file_path) && file_path.exists() {
-                    new_files.push(file_path);
-                }
-            }
+                // Discover current protected files
+                let current_files = temp_monitor.get_protected_file_paths();
+                let mut new_files = Vec::new();
 
-            if !new_files.is_empty() {
-                log::info!("Discovered {} new protected files", new_files.len());
-
-                if let Some(fd) = self.fanotify_fd {
-                    for file_path in new_files {
-                        if let Ok(true) = self.add_file_watch(fd, &file_path) {
-                            // Note: In a real implementation, we'd need mutable access
-                            // For now, just log the discovery
-                            log::info!("Would add watch for new file: {}", file_path.display());
+                // Check which files are not yet being watched
+                {
+                    let watched = watched_paths.lock().unwrap();
+                    for file_path in current_files {
+                        if !watched.contains(&file_path) && file_path.exists() {
+                            new_files.push(file_path);
                         }
+                    }
+                }
+
+                if !new_files.is_empty() {
+                    log::info!("Discovered {} new protected files", new_files.len());
+
+                    let mut successful_new_watches = 0;
+                    for file_path in new_files {
+                        if let Ok(true) = temp_monitor.add_file_watch(fd, &file_path) {
+                            watched_paths.lock().unwrap().push(file_path.clone());
+                            successful_new_watches += 1;
+                            log::info!("Added watch for new file: {}", file_path.display());
+                        }
+                    }
+
+                    if successful_new_watches > 0 {
+                        log::info!(
+                            "Successfully added {} new file watches",
+                            successful_new_watches
+                        );
                     }
                 }
             }
