@@ -11,6 +11,9 @@ use tokio::process::Command as TokioCommand;
 #[cfg(target_os = "linux")]
 use crate::linux_monitor::LinuxMonitor;
 
+#[cfg(target_os = "freebsd")]
+use crate::freebsd_monitor::FreeBSDMonitor;
+
 pub struct Monitor {
     rule_engine: RuleEngine,
     mode: Mode,
@@ -59,6 +62,10 @@ impl Monitor {
             Mechanism::Fanotify => self.monitor_with_fanotify().await,
             #[cfg(target_os = "linux")]
             Mechanism::Ebpf => self.monitor_with_ebpf().await,
+            #[cfg(target_os = "freebsd")]
+            Mechanism::Dtrace => self.monitor_with_dtrace().await,
+            #[cfg(target_os = "freebsd")]
+            Mechanism::Kqueue => self.monitor_with_kqueue().await,
             Mechanism::Auto => self.monitor_with_auto().await,
         }
     }
@@ -317,7 +324,7 @@ impl Monitor {
             .map(|p| p as u32);
 
         // Extract signing info from eslogger (no filesystem access!)
-        let signing_id = json.get("process")
+        let app_id = json.get("process")
             .and_then(|p| p.get("signing_id"))
             .and_then(|s| s.as_str());
 
@@ -326,9 +333,9 @@ impl Monitor {
             .and_then(|t| t.as_str());
 
         // Combine signing info into a single string
-        let signing_info = match (signing_id, team_id) {
-            (Some(sid), Some(tid)) => Some(format!("{} [{}]", sid, tid)),
-            (Some(sid), None) => Some(sid.to_string()),
+        let signing_info = match (app_id, team_id) {
+            (Some(aid), Some(tid)) => Some(format!("{} [{}]", aid, tid)),
+            (Some(aid), None) => Some(aid.to_string()),
             (None, Some(tid)) => Some(format!("[{}]", tid)),
             (None, None) => None,
         };
@@ -379,7 +386,7 @@ impl Monitor {
             .map(|p| p as u32);
 
         // Extract signing info
-        let signing_id = json.get("process")
+        let app_id = json.get("process")
             .and_then(|p| p.get("signing_id"))
             .and_then(|s| s.as_str());
 
@@ -387,9 +394,9 @@ impl Monitor {
             .and_then(|p| p.get("team_id"))
             .and_then(|t| t.as_str());
 
-        let signing_info = match (signing_id, team_id) {
-            (Some(sid), Some(tid)) => Some(format!("{} [{}]", sid, tid)),
-            (Some(sid), None) => Some(sid.to_string()),
+        let signing_info = match (app_id, team_id) {
+            (Some(aid), Some(tid)) => Some(format!("{} [{}]", aid, tid)),
+            (Some(aid), None) => Some(aid.to_string()),
             (None, Some(tid)) => Some(format!("[{}]", tid)),
             (None, None) => None,
         };
@@ -1213,6 +1220,21 @@ impl Monitor {
         ))
     }
 
+    #[cfg(target_os = "freebsd")]
+    async fn monitor_with_dtrace(&mut self) -> Result<()> {
+        log::info!("Using DTrace mechanism for FreeBSD");
+
+        let mut monitor = FreeBSDMonitor::new(self.mode, self.verbose, self.stop_parent);
+        monitor.start().await
+    }
+
+    #[cfg(target_os = "freebsd")]
+    async fn monitor_with_kqueue(&mut self) -> Result<()> {
+        Err(anyhow::anyhow!(
+            "kqueue monitoring not yet implemented. Use --mechanism dtrace for now."
+        ))
+    }
+
     async fn monitor_with_auto(&mut self) -> Result<()> {
         #[cfg(target_os = "macos")]
         {
@@ -1228,7 +1250,14 @@ impl Monitor {
             self.monitor_with_fanotify().await
         }
 
-        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+        #[cfg(target_os = "freebsd")]
+        {
+            log::info!("Auto-selecting DTrace for FreeBSD");
+            self.mechanism = Mechanism::Dtrace;
+            self.monitor_with_dtrace().await
+        }
+
+        #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "freebsd")))]
         {
             Err(anyhow::anyhow!(
                 "No monitoring mechanism available for this platform"

@@ -6,994 +6,1101 @@
 protected_files:
   # SSH Keys
   - pattern: "~/.ssh/id_*"
-    allowed_programs:
-      - ssh
-      - ssh-add
-      - ssh-agent
-      - ssh-keygen
-      - scp
-      - sftp
-      - rsync
-      - git
-      - git-remote-https
-      - gh
-    allowed_signers:
-      - "com.apple.Terminal"
-      - "com.googlecode.iterm2"
-      - "com.microsoft.VSCode"
-      - "dev.warp.Warp"
+    allow:
+      # SSH tools from system paths only
+      - base: "ssh"
+      - base: "ssh-add"
+      - base: "ssh-agent"
+      - base: "ssh-keygen"
+      - base: "scp"
+      - base: "sftp"
+      - base: "rsync"
+
+      # SSH from Homebrew Cellar (versioned paths)
+      - base: "ssh"
+        path_pattern: "/opt/homebrew/Cellar/openssh/*/bin/*"
+
+      # Git from standard locations
+      - base: "git"
+      - base: "git-remote-https"
+        path_pattern: "/usr/libexec/git-core/*"
+
+      # Git from Developer Tools
+      - base: "git"
+        path_pattern: "/Library/Developer/CommandLineTools/usr/bin/*"
+
+      # GitHub CLI
+      - base: "gh"
+
+      # GitHub CLI from Homebrew Cellar (versioned paths)
+      - base: "gh"
+        path_pattern: "/opt/homebrew/Cellar/gh/*/bin/*"
+
+      # Terminal apps with ppid=1 (GUI apps launched by launchd)
+      - app_id: "com.apple.Terminal"
+        ppid: 1
+      - app_id: "com.googlecode.iterm2"
+        ppid: 1
+      - app_id: "com.microsoft.VSCode"
+        ppid: 1
+      - team_id: "dev.warp.Warp"
+        ppid: 1
 
   - pattern: "~/.ssh/*_key"
-    allowed_programs:
-      - ssh
-      - ssh-add
-      - ssh-agent
-      - ssh-keygen
-      - scp
-      - sftp
-      - rsync
-      - git
-    allowed_signers:
-      - "com.apple.Terminal"
-      - "com.googlecode.iterm2"
+    allow:
+      # Same as id_* keys
+      - base: "ssh"
+      - base: "ssh-add"
+      - base: "ssh-agent"
+      - base: "ssh-keygen"
+      - base: "scp"
+      - base: "sftp"
+      - base: "rsync"
+      - base: "git"
+
+      # SSH from Homebrew Cellar (versioned paths)
+      - base: "ssh"
+        path_pattern: "/opt/homebrew/Cellar/openssh/*/bin/*"
+
+      # Git from Developer Tools
+      - base: "git"
+        path_pattern: "/Library/Developer/CommandLineTools/usr/bin/*"
 
   # AWS Credentials
   - pattern: "~/.aws/credentials"
-    allowed_programs:
-      - aws
-      - terraform
-      - ansible
-      - ansible-playbook
-      - packer
-      - boto
-      - python
-      - python3
-    allowed_signers:
-      - "HashiCorp"  # Terraform team ID
-      - "com.amazon.AWS-CLI"
+    allow:
+      # AWS CLI from standard locations
+      - base: "aws"
+
+      # Terraform by team ID
+      - team_id: "D38WU7D763"  # HashiCorp
+
+      # Ansible
+      - base: "ansible"
+      - base: "ansible-playbook"
+
+      # Packer
+      - base: "packer"
+
+      # Python for boto3 - must be from specific locations
+      - base: "python"
+      - base: "python3"
+        path_pattern: "~/.venv/*/bin/*"
+      - base: "python3"
+        path_pattern: "~/.*env/bin/*"
 
   - pattern: "~/.aws/config"
-    allowed_programs:
-      - aws
-      - terraform
-      - ansible
-      - packer
-    allowed_signers:
-      - "HashiCorp"
+    allow:
+      - base: "aws"
+      - team_id: "D38WU7D763"  # HashiCorp (Terraform)
+      - base: "ansible"
+      - base: "packer"
 
   # Google Cloud
   - pattern: "~/.config/gcloud/credentials.db"
-    allowed_programs:
-      - gcloud
-      - gsutil
-      - bq
-      - kubectl
-      - python
-      - python3
-      - Python  # macOS Python wrapper
-    allowed_signers:
-      - "EQHXZ8M8AV"  # Google team ID
-      - "com.apple.python3"  # System Python used by gcloud
+    allow:
+      # Google Cloud SDK tools
+      - base: "gcloud"
+      - base: "gsutil"
+      - base: "bq"
+      - base: "kubectl"
+
+      # Python used by gcloud
+      - base: "python"
+      - base: "python3"
+      - base: "Python"  # macOS Python wrapper
+        app_id: "com.apple.python3"
 
   - pattern: "~/.config/gcloud/access_tokens.db"
-    allowed_programs:
-      - gcloud
-      - gsutil
-      - bq
-      - python
-      - python3
-      - Python  # macOS Python wrapper
-    allowed_signers:
-      - "EQHXZ8M8AV"  # Google team ID
-      - "com.apple.python3"  # System Python used by gcloud
+    allow:
+      - base: "gcloud"
+      - base: "gsutil"
+      - base: "bq"
+      - base: "python"
+      - base: "python3"
+      - base: "Python"
+        app_id: "com.apple.python3"
 
   # Azure
   - pattern: "~/.azure/accessTokens.json"
-    allowed_programs:
-      - az
-      - azure-cli
-      - powershell
-    allowed_signers:
-      - "UBF8T346G9"  # Microsoft team ID
+    allow:
+      - base: "az"
+      - base: "azure-cli"
+      - base: "powershell"
+        path_pattern: "/usr/local/microsoft/powershell/*/pwsh"
+        team_id: "UBF8T346G9"  # Microsoft
 
   # GPG Keys
   - pattern: "~/.gnupg/private-keys*"
-    allowed_programs:
-      - gpg
-      - gpg2
-      - gpg-agent
-      - pinentry
-      - pass
-    allowed_signers:
-      - "org.gpgtools.gpg"
+    allow:
+      - base: "gpg"
+      - base: "gpg2"
+      - base: "gpg-agent"
+      - base: "pinentry*"
+      - base: "pass"
 
   - pattern: "~/.gnupg/secring.gpg"
-    allowed_programs:
-      - gpg
-      - gpg2
-      - gpg-agent
+    allow:
+      - base: "gpg"
+      - base: "gpg2"
+      - base: "gpg-agent"
 
   # Package Manager Credentials
   - pattern: "~/.npmrc"
-    allowed_programs:
-      - npm
-      - node
-      - yarn
-      - pnpm
-    allowed_signers:
-      - "com.nodejs.node"
+    allow:
+      - base: "npm"
+      - base: "node"
+      - base: "yarn"
+      - base: "pnpm"
 
   - pattern: "~/.pypirc"
-    allowed_programs:
-      - python
-      - python3
-      - pip
-      - pip3
-      - twine
+    allow:
+      - base: "python"
+      - base: "python3"
+      - base: "pip"
+      - base: "pip3"
+      - base: "twine"
+        path_pattern: "~/.local/bin/*"
 
   - pattern: "~/.cargo/credentials"
-    allowed_programs:
-      - cargo
-      - rustc
-      - rustup
+    allow:
+      - base: "cargo"
+        path_pattern: "~/.cargo/bin/*"
+      - base: "rustc"
+        path_pattern: "~/.cargo/bin/*"
+      - base: "rustup"
+        path_pattern: "~/.cargo/bin/*"
 
   - pattern: "~/.docker/config.json"
-    allowed_programs:
-      - docker
-      - docker-compose
-      - docker-credential-desktop
-      - Docker
-    allowed_signers:
-      - "com.docker.Docker"
+    allow:
+      - base: "docker"
+      - base: "docker-compose"
+      - base: "docker-credential-desktop"
+      # Docker Desktop GUI app
+      - base: "Docker"
+        team_id: "9BNSXJN65R"  # Docker Inc
+        ppid: 1
 
   # Kubernetes
   - pattern: "~/.kube/config"
-    allowed_programs:
-      - kubectl
-      - helm
-      - k9s
-      - lens
-      - minikube
-    allowed_signers:
-      - "io.k8slens.lens"
+    allow:
+      - base: "kubectl"
+      - base: "helm"
+      - base: "k9s"
+      - base: "minikube"
+      # Lens GUI app
+      - team_id: "R6H3FQGQ9K"  # Mirantis (Lens)
+        ppid: 1
 
   # Browser Password Stores - Firefox
   - pattern: "~/Library/Application Support/Firefox/Profiles/*/logins.json"
-    allowed_programs:
-      - firefox
-      - Firefox
-      - "com.apple.Safari.BrowserDataImportingService"  # Safari's import feature
-    allowed_signers:
-      - "org.mozilla.firefox"
-      - "org.mozilla.firefoxdeveloperedition"  # Firefox Developer Edition
-      - "43AQ936H96"  # Mozilla team ID
-      - "com.apple.Safari.BrowserDataImportingService"  # Safari import service
+    allow:
+      # Firefox GUI apps must have ppid=1
+      - base: "firefox"
+        team_id: "43AQ936H96"  # Mozilla
+        ppid: 1
+      - base: "Firefox"
+        team_id: "43AQ936H96"
+        ppid: 1
+      # Safari import service (system process)
+      - base: "com.apple.Safari.BrowserDataImportingService"
+        app_id: "com.apple.*"
 
   - pattern: "~/Library/Application Support/Firefox/Profiles/*/key*.db"
-    allowed_programs:
-      - firefox
-      - Firefox
-      - "com.apple.Safari.BrowserDataImportingService"  # Safari's import feature
-    allowed_signers:
-      - "org.mozilla.firefox"
-      - "org.mozilla.firefoxdeveloperedition"  # Firefox Developer Edition
-      - "43AQ936H96"  # Mozilla team ID
-      - "com.apple.Safari.BrowserDataImportingService"  # Safari import service
+    allow:
+      - base: "firefox"
+        team_id: "43AQ936H96"
+        ppid: 1
+      - base: "Firefox"
+        team_id: "43AQ936H96"
+        ppid: 1
+      - base: "com.apple.Safari.BrowserDataImportingService"
+        app_id: "com.apple.*"
 
   - pattern: "~/Library/Application Support/Firefox/Profiles/*/cookies.sqlite"
-    allowed_programs:
-      - firefox
-      - Firefox
-      - "com.apple.Safari.BrowserDataImportingService"  # Safari's import feature
-    allowed_signers:
-      - "org.mozilla.firefox"
-      - "org.mozilla.firefoxdeveloperedition"  # Firefox Developer Edition
-      - "43AQ936H96"  # Mozilla team ID
-      - "com.apple.Safari.BrowserDataImportingService"  # Safari import service
+    allow:
+      - base: "firefox"
+        team_id: "43AQ936H96"
+        ppid: 1
+      - base: "Firefox"
+        team_id: "43AQ936H96"
+        ppid: 1
+      - base: "com.apple.Safari.BrowserDataImportingService"
+        app_id: "com.apple.*"
 
   # Zen Browser (Firefox-based)
   - pattern: "~/Library/Application Support/Zen/Profiles/*/logins.json"
-    allowed_programs:
-      - zen
-      - Zen
-    allowed_signers:
-      - "app.zen-browser.zen"
-      - "9V5K9TP787"  # Zen Browser team ID
+    allow:
+      - base: "zen"
+        team_id: "9V5K9TP787"  # Zen Browser
+        ppid: 1
+      - base: "Zen"
+        team_id: "9V5K9TP787"
+        ppid: 1
 
   - pattern: "~/Library/Application Support/Zen/Profiles/*/key*.db"
-    allowed_programs:
-      - zen
-      - Zen
-    allowed_signers:
-      - "app.zen-browser.zen"
-      - "9V5K9TP787"  # Zen Browser team ID
+    allow:
+      - base: "zen"
+        team_id: "9V5K9TP787"
+        ppid: 1
+      - base: "Zen"
+        team_id: "9V5K9TP787"
+        ppid: 1
 
   - pattern: "~/Library/Application Support/Zen/Profiles/*/cookies.sqlite"
-    allowed_programs:
-      - zen
-      - Zen
-    allowed_signers:
-      - "app.zen-browser.zen"
-      - "9V5K9TP787"  # Zen Browser team ID
+    allow:
+      - base: "zen"
+        team_id: "9V5K9TP787"
+        ppid: 1
+      - base: "Zen"
+        team_id: "9V5K9TP787"
+        ppid: 1
 
   - pattern: "~/Library/Application Support/Zen/Profiles/*/places.sqlite"
-    allowed_programs:
-      - zen
-      - Zen
-    allowed_signers:
-      - "app.zen-browser.zen"
-      - "9V5K9TP787"  # Zen Browser team ID
+    allow:
+      - base: "zen"
+        team_id: "9V5K9TP787"
+        ppid: 1
+      - base: "Zen"
+        team_id: "9V5K9TP787"
+        ppid: 1
 
   - pattern: "~/Library/Application Support/Zen/Profiles/*/formhistory.sqlite"
-    allowed_programs:
-      - zen
-      - Zen
-    allowed_signers:
-      - "app.zen-browser.zen"
-      - "9V5K9TP787"  # Zen Browser team ID
+    allow:
+      - base: "zen"
+        team_id: "9V5K9TP787"
+        ppid: 1
+      - base: "Zen"
+        team_id: "9V5K9TP787"
+        ppid: 1
 
   - pattern: "~/Library/Application Support/Zen/Profiles/*/signons.sqlite"
-    allowed_programs:
-      - zen
-      - Zen
-    allowed_signers:
-      - "app.zen-browser.zen"
-      - "9V5K9TP787"  # Zen Browser team ID
+    allow:
+      - base: "zen"
+        team_id: "9V5K9TP787"
+        ppid: 1
+      - base: "Zen"
+        team_id: "9V5K9TP787"
+        ppid: 1
 
   - pattern: "~/Library/Application Support/Zen/Profiles/*/cert*.db"
-    allowed_programs:
-      - zen
-      - Zen
-    allowed_signers:
-      - "app.zen-browser.zen"
-      - "9V5K9TP787"  # Zen Browser team ID
+    allow:
+      - base: "zen"
+        team_id: "9V5K9TP787"
+        ppid: 1
+      - base: "Zen"
+        team_id: "9V5K9TP787"
+        ppid: 1
 
   # Browser Password Stores - Chrome
   - pattern: "~/Library/Application Support/Google/Chrome/*/Login Data"
-    allowed_programs:
-      - "Google Chrome"
-      - chrome
-    allowed_signers:
-      - "com.google.Chrome"
+    allow:
+      - base: "Google Chrome"
+        team_id: "EQHXZ8M8AV"  # Google
+        ppid: 1
 
   - pattern: "~/Library/Application Support/Google/Chrome/*/Cookies"
-    allowed_programs:
-      - "Google Chrome"
-      - chrome
-    allowed_signers:
-      - "com.google.Chrome"
+    allow:
+      - base: "Google Chrome"
+        team_id: "EQHXZ8M8AV"
+        ppid: 1
 
   - pattern: "~/Library/Application Support/Google/Chrome/*/Web Data"
-    allowed_programs:
-      - "Google Chrome"
-      - chrome
-    allowed_signers:
-      - "com.google.Chrome"
+    allow:
+      - base: "Google Chrome"
+        team_id: "EQHXZ8M8AV"
+        ppid: 1
 
   - pattern: "~/Library/Application Support/Google/Chrome/*/History"
-    allowed_programs:
-      - "Google Chrome"
-      - chrome
-    allowed_signers:
-      - "com.google.Chrome"
+    allow:
+      - base: "Google Chrome"
+        team_id: "EQHXZ8M8AV"
+        ppid: 1
 
   - pattern: "~/Library/Application Support/Google/Chrome/*/Network/Cookies"
-    allowed_programs:
-      - "Google Chrome"
-      - chrome
-    allowed_signers:
-      - "com.google.Chrome"
+    allow:
+      - base: "Google Chrome"
+        team_id: "EQHXZ8M8AV"
+        ppid: 1
 
   # Chrome Beta
   - pattern: "~/Library/Application Support/Google/Chrome Beta/*/Login Data"
-    allowed_programs:
-      - "Google Chrome Beta"
-      - chrome-beta
-    allowed_signers:
-      - "com.google.Chrome.beta"
-      - "EQHXZ8M8AV"  # Google team ID
+    allow:
+      - base: "Google Chrome Beta"
+        team_id: "EQHXZ8M8AV"
+        ppid: 1
 
   - pattern: "~/Library/Application Support/Google/Chrome Beta/*/Cookies"
-    allowed_programs:
-      - "Google Chrome Beta"
-      - chrome-beta
-    allowed_signers:
-      - "com.google.Chrome.beta"
-      - "EQHXZ8M8AV"  # Google team ID
+    allow:
+      - base: "Google Chrome Beta"
+        team_id: "EQHXZ8M8AV"
+        ppid: 1
 
   - pattern: "~/Library/Application Support/Google/Chrome Beta/*/Web Data"
-    allowed_programs:
-      - "Google Chrome Beta"
-      - chrome-beta
-    allowed_signers:
-      - "com.google.Chrome.beta"
-      - "EQHXZ8M8AV"  # Google team ID
+    allow:
+      - base: "Google Chrome Beta"
+        team_id: "EQHXZ8M8AV"
+        ppid: 1
 
   - pattern: "~/Library/Application Support/Google/Chrome Beta/*/History"
-    allowed_programs:
-      - "Google Chrome Beta"
-      - chrome-beta
-    allowed_signers:
-      - "com.google.Chrome.beta"
-      - "EQHXZ8M8AV"  # Google team ID
+    allow:
+      - base: "Google Chrome Beta"
+        team_id: "EQHXZ8M8AV"
+        ppid: 1
 
   - pattern: "~/Library/Application Support/Google/Chrome Beta/*/Network/Cookies"
-    allowed_programs:
-      - "Google Chrome Beta"
-      - chrome-beta
-    allowed_signers:
-      - "com.google.Chrome.beta"
-      - "EQHXZ8M8AV"  # Google team ID
+    allow:
+      - base: "Google Chrome Beta"
+        team_id: "EQHXZ8M8AV"
+        ppid: 1
 
   # Chrome Canary
   - pattern: "~/Library/Application Support/Google/Chrome Canary/*/Login Data"
-    allowed_programs:
-      - "Google Chrome Canary"
-      - chrome-canary
-    allowed_signers:
-      - "com.google.Chrome.canary"
-      - "EQHXZ8M8AV"  # Google team ID
+    allow:
+      - base: "Google Chrome Canary"
+        team_id: "EQHXZ8M8AV"
+        ppid: 1
 
   - pattern: "~/Library/Application Support/Google/Chrome Canary/*/Cookies"
-    allowed_programs:
-      - "Google Chrome Canary"
-      - chrome-canary
-    allowed_signers:
-      - "com.google.Chrome.canary"
-      - "EQHXZ8M8AV"  # Google team ID
+    allow:
+      - base: "Google Chrome Canary"
+        team_id: "EQHXZ8M8AV"
+        ppid: 1
 
   - pattern: "~/Library/Application Support/Google/Chrome Canary/*/Web Data"
-    allowed_programs:
-      - "Google Chrome Canary"
-      - chrome-canary
-    allowed_signers:
-      - "com.google.Chrome.canary"
-      - "EQHXZ8M8AV"  # Google team ID
+    allow:
+      - base: "Google Chrome Canary"
+        team_id: "EQHXZ8M8AV"
+        ppid: 1
 
   - pattern: "~/Library/Application Support/Google/Chrome Canary/*/History"
-    allowed_programs:
-      - "Google Chrome Canary"
-      - chrome-canary
-    allowed_signers:
-      - "com.google.Chrome.canary"
-      - "EQHXZ8M8AV"  # Google team ID
+    allow:
+      - base: "Google Chrome Canary"
+        team_id: "EQHXZ8M8AV"
+        ppid: 1
 
   - pattern: "~/Library/Application Support/Google/Chrome Canary/*/Network/Cookies"
-    allowed_programs:
-      - "Google Chrome Canary"
-      - chrome-canary
-    allowed_signers:
-      - "com.google.Chrome.canary"
-      - "EQHXZ8M8AV"  # Google team ID
+    allow:
+      - base: "Google Chrome Canary"
+        team_id: "EQHXZ8M8AV"
+        ppid: 1
 
-  # Chromium variants (macOS)
+  # Chromium
   - pattern: "~/Library/Application Support/Chromium/*/Login Data"
-    allowed_programs:
-      - Chromium
-      - chromium
-    allowed_signers:
-      - "org.chromium.Chromium"
+    allow:
+      - base: "Chromium"
+        ppid: 1
 
   - pattern: "~/Library/Application Support/Chromium/*/Cookies"
-    allowed_programs:
-      - Chromium
-      - chromium
-    allowed_signers:
-      - "org.chromium.Chromium"
+    allow:
+      - base: "Chromium"
+        ppid: 1
 
   - pattern: "~/Library/Application Support/Chromium/*/Web Data"
-    allowed_programs:
-      - Chromium
-      - chromium
-    allowed_signers:
-      - "org.chromium.Chromium"
+    allow:
+      - base: "Chromium"
+        ppid: 1
 
   # Email Clients - macOS Mail
   - pattern: "~/Library/Mail/V*/MailData/Accounts.plist"
-    allowed_programs:
-      - Mail
-      - MailService
-    allowed_signers:
-      - "com.apple.mail"
-      - "com.apple.MailServiceAgent"
+    allow:
+      - base: "Mail"
+        app_id: "com.apple.*"
+        ppid: 1
+      - base: "MailService"
+        app_id: "com.apple.*"
 
   - pattern: "~/Library/Mail/V*/MailData/*/MessageData/*"
-    allowed_programs:
-      - Mail
-      - MailService
-    allowed_signers:
-      - "com.apple.mail"
-      - "com.apple.MailServiceAgent"
+    allow:
+      - base: "Mail"
+        app_id: "com.apple.*"
+        ppid: 1
+      - base: "MailService"
+        app_id: "com.apple.*"
 
   - pattern: "~/Library/Accounts/Accounts4.sqlite"
-    allowed_programs:
-      - Mail
-      - accountsd
-      - SecurityAgent
-    allowed_signers:
-      - "com.apple.mail"
-      - "com.apple.accountsd"
-      - "com.apple.SecurityAgent"
+    allow:
+      - base: "Mail"
+        app_id: "com.apple.*"
+        ppid: 1
+      - base: "accountsd"
+        app_id: "com.apple.*"
+      - base: "SecurityAgent"
+        app_id: "com.apple.*"
 
   - pattern: "~/Library/Containers/com.apple.mail/Data/Library/Mail/*"
-    allowed_programs:
-      - Mail
-    allowed_signers:
-      - "com.apple.mail"
+    allow:
+      - base: "Mail"
+        app_id: "com.apple.*"
+        ppid: 1
 
   # Microsoft Outlook
   - pattern: "~/Library/Group Containers/UBF8T346G9.Office/Outlook/Outlook 15 Profiles/Main Profile/Accounts/*"
-    allowed_programs:
-      - "Microsoft Outlook"
-      - Outlook
-    allowed_signers:
-      - "UBF8T346G9"  # Microsoft team ID
+    allow:
+      - base: "Microsoft Outlook"
+        team_id: "UBF8T346G9"  # Microsoft
+        ppid: 1
 
   - pattern: "~/Library/Group Containers/UBF8T346G9.Office/Outlook/Outlook 15 Profiles/Main Profile/*.olk15Message"
-    allowed_programs:
-      - "Microsoft Outlook"
-      - Outlook
-    allowed_signers:
-      - "UBF8T346G9"  # Microsoft team ID
+    allow:
+      - base: "Microsoft Outlook"
+        team_id: "UBF8T346G9"
+        ppid: 1
 
   # Spark Mail
   - pattern: "~/Library/Containers/com.readdle.smartemail-Mac/Data/Library/Application Support/Spark/Accounts.db"
-    allowed_programs:
-      - Spark
-      - "Spark – Email App by Readdle"
-    allowed_signers:
-      - "com.readdle.smartemail-Mac"
-
-  # Airmail
-  - pattern: "~/Library/Containers/it.bloop.airmail*/Data/Library/Application Support/Airmail/Accounts.db"
-    allowed_programs:
-      - Airmail
-      - "Airmail 5"
-    allowed_signers:
-      - "it.bloop.airmail"
+    allow:
+      - base: "Spark"
+        team_id: "6Z8N55R3J2"  # Readdle
+        ppid: 1
+      - base: "Spark – Email App by Readdle"
+        team_id: "6Z8N55R3J2"
+        ppid: 1
 
   # Thunderbird
   - pattern: "~/Library/Thunderbird/Profiles/*/logins.json"
-    allowed_programs:
-      - Thunderbird
-      - thunderbird
-    allowed_signers:
-      - "org.mozilla.thunderbird"
+    allow:
+      - base: "Thunderbird"
+        team_id: "43AQ936H96"  # Mozilla
+        ppid: 1
 
   - pattern: "~/Library/Thunderbird/Profiles/*/cookies.sqlite"
-    allowed_programs:
-      - Thunderbird
-      - thunderbird
-    allowed_signers:
-      - "org.mozilla.thunderbird"
+    allow:
+      - base: "Thunderbird"
+        team_id: "43AQ936H96"
+        ppid: 1
 
   - pattern: "~/Library/Thunderbird/Profiles/*/key*.db"
-    allowed_programs:
-      - Thunderbird
-      - thunderbird
-    allowed_signers:
-      - "org.mozilla.thunderbird"
-
-  # Canary Mail
-  - pattern: "~/Library/Containers/io.canarymail.mac/Data/Library/Application Support/CanaryMail/accounts.db"
-    allowed_programs:
-      - "Canary Mail"
-      - CanaryMail
-    allowed_signers:
-      - "io.canarymail.mac"
-
-  # Newton Mail
-  - pattern: "~/Library/Application Support/Newton/data/*"
-    allowed_programs:
-      - Newton
-    allowed_signers:
-      - "com.cloudmagic.newton"
-
-  # Polymail
-  - pattern: "~/Library/Application Support/Polymail/config.json"
-    allowed_programs:
-      - Polymail
-    allowed_signers:
-      - "com.polymail.osx"
+    allow:
+      - base: "Thunderbird"
+        team_id: "43AQ936H96"
+        ppid: 1
 
   # Safari Extensions and Data
   - pattern: "~/Library/Safari/LocalStorage/*"
-    allowed_programs:
-      - Safari
-      - SafariServices
-    allowed_signers:
-      - "com.apple.Safari"
+    allow:
+      - base: "Safari"
+        app_id: "com.apple.*"
+        ppid: 1
+      - base: "SafariServices"
+        app_id: "com.apple.*"
 
   - pattern: "~/Library/Safari/Databases/*"
-    allowed_programs:
-      - Safari
-      - SafariServices
-    allowed_signers:
-      - "com.apple.Safari"
+    allow:
+      - base: "Safari"
+        app_id: "com.apple.*"
+        ppid: 1
+      - base: "SafariServices"
+        app_id: "com.apple.*"
 
-  # macOS Keychain
+  # macOS Keychain - Most permissive since many apps need it
   - pattern: "~/Library/Keychains/login.keychain-db"
-    allowed_programs:
-      - security
-      - "Keychain Access"
-      - SecurityAgent
-      - codesign
-      - accountsd
-      - sharingd
-      - cloudd
-      - securityd
-      - trustd
-    allowed_signers:
-      # Apple system processes (all have com.apple.* signing IDs)
-      - "com.apple.accountsd"
-      - "com.apple.sharingd"
-      - "com.apple.cloudd"
-      - "com.apple.securityd"
-      - "com.apple.trustd"
-      - "com.apple.SecurityAgent"
-      - "com.apple.security"
-      - "com.apple.codesign"
-      - "com.apple.Safari"
-      # Third-party apps by team ID
-      - "EQHXZ8M8AV"  # Google
-      - "AXL7V72P4Y"  # Dropbox
-      - "2BUA8C4S2C"  # 1Password
-      - "LTZ2PFU5D6"  # Bitwarden
-      - "44U7362S3E"  # LastPass
-      - "6JSW4SJWN9"  # Dashlane
-      - "43AQ936H96"  # Mozilla (Firefox Developer Edition)
-      - "9V5K9TP787"  # Zen Browser
+    allow:
+      # Apple system processes
+      - app_id: "com.apple.*"
+
+      # Any legitimate app from standard app locations with ppid=1
+      - path_pattern: "/Applications/*/*.app/Contents/MacOS/*"
+        ppid: 1
+      - path_pattern: "/System/Applications/*/*.app/Contents/MacOS/*"
+        ppid: 1
+      - path_pattern: "~/Applications/*/*.app/Contents/MacOS/*"
+        ppid: 1
+      - path_pattern: "/Applications/Utilities/*/*.app/Contents/MacOS/*"
+        ppid: 1
+
+      # Homebrew Cask apps
+      - path_pattern: "/opt/homebrew/Caskroom/*/*.app/Contents/MacOS/*"
+        ppid: 1
+
+      # Command-line tools that legitimately need keychain
+      - base: "security"
+      - base: "codesign"
+      # Hardcoded path for Apple's security tool
+      - path: "/usr/bin/security"
 
   - pattern: "~/Library/Keychains/*.keychain-db"
-    allowed_programs:
-      - security
-      - "Keychain Access"
-      - SecurityAgent
-      - securityd
-    allowed_signers:
-      - "com.apple.security"
-      - "com.apple.SecurityAgent"
-      - "com.apple.securityd"
-      - "43AQ936H96"  # Mozilla (Firefox Developer Edition)
-      - "9V5K9TP787"  # Zen Browser
+    allow:
+      # Apple system processes
+      - app_id: "com.apple.*"
+
+      # Security tools
+      - base: "security"
+      - base: "Keychain Access"
+        app_id: "com.apple.*"
+        ppid: 1
+      # Hardcoded path for Apple's security tool
+      - path: "/usr/bin/security"
 
   # Password Managers
   - pattern: "~/.password-store/**/*.gpg"
-    allowed_programs:
-      - pass
-      - gpg
-      - gpg2
-      - passmenu
+    allow:
+      - base: "pass"
+      - base: "gpg"
+      - base: "gpg2"
+      - base: "passmenu"
 
   - pattern: "~/Documents/*.kdbx"
-    allowed_programs:
-      - keepassxc
-      - keepassx
-      - keepass2
-      - kpcli
-    allowed_signers:
-      - "G2S7R7PVXJ"  # KeePassXC team ID
+    allow:
+      # KeePassXC GUI app
+      - base: "keepassxc"
+        team_id: "G2S7R7PVXJ"  # KeePassXC
+        ppid: 1
+      - base: "KeePassXC"
+        team_id: "G2S7R7PVXJ"
+        ppid: 1
+      # Command-line tools
+      - base: "kpcli"
 
   - pattern: "~/Library/Application Support/Bitwarden/data.json"
-    allowed_programs:
-      - Bitwarden
-      - bitwarden
-    allowed_signers:
-      - "LTZ2PFU5D6"  # Bitwarden team ID
+    allow:
+      - base: "Bitwarden"
+        team_id: "LTZ2PFU5D6"  # Bitwarden
+        ppid: 1
 
   # Cryptocurrency Wallets
   - pattern: "~/Library/Application Support/Bitcoin/wallet.dat"
-    allowed_programs:
-      - Bitcoin-Qt
-      - bitcoin-cli
-    allowed_signers:
-      - "org.bitcoinfoundation.Bitcoin-Qt"
+    allow:
+      - base: "Bitcoin-Qt"
+        ppid: 1
+      - base: "bitcoin-cli"
 
   - pattern: "~/Library/Application Support/Ethereum/keystore/*"
-    allowed_programs:
-      - geth
-      - Mist
-    allowed_signers:
-      - "org.ethereum.mist"
+    allow:
+      - base: "geth"
+      - base: "Mist"
+        ppid: 1
 
   - pattern: "~/Library/Application Support/Electrum/wallets/*"
-    allowed_programs:
-      - Electrum
-    allowed_signers:
-      - "org.electrum.electrum"
+    allow:
+      - base: "Electrum"
+        ppid: 1
 
   - pattern: "~/Library/Application Support/exodus/exodus.wallet/*"
-    allowed_programs:
-      - Exodus
-    allowed_signers:
-      - "com.exodus.exodus"
+    allow:
+      - base: "Exodus"
+        ppid: 1
 
   - pattern: "~/Library/Application Support/atomic/Local Storage/leveldb/*"
-    allowed_programs:
-      - "Atomic Wallet"
-    allowed_signers:
-      - "com.atomicwallet.atomicwallet"
+    allow:
+      - base: "Atomic Wallet"
+        ppid: 1
 
   # Discord Token
   - pattern: "~/Library/Application Support/discord/Local Storage/leveldb/*"
-    allowed_programs:
-      - Discord
-    allowed_signers:
-      - "com.hnc.Discord"
+    allow:
+      - base: "Discord"
+        team_id: "53Q6R32WPB"  # Discord
+        ppid: 1
 
-  # Slack Cookies/Tokens
+  # Slack
   - pattern: "~/Library/Application Support/Slack/Cookies"
-    allowed_programs:
-      - Slack
-    allowed_signers:
-      - "com.tinyspeck.slackmacgap"
+    allow:
+      - base: "Slack"
+        team_id: "BQR82RAZA8"  # Slack
+        ppid: 1
 
   - pattern: "~/Library/Application Support/Slack/Local Storage/leveldb/*"
-    allowed_programs:
-      - Slack
-    allowed_signers:
-      - "com.tinyspeck.slackmacgap"
+    allow:
+      - base: "Slack"
+        team_id: "BQR82RAZA8"
+        ppid: 1
 
-  # Telegram Session
+  # Telegram
   - pattern: "~/Library/Application Support/Telegram Desktop/tdata/*"
-    allowed_programs:
-      - "Telegram Desktop"
-      - Telegram
-    allowed_signers:
-      - "com.tdesktop.Telegram"
+    allow:
+      - base: "Telegram Desktop"
+        ppid: 1
+      - base: "Telegram"
+        ppid: 1
 
-  # Signal Database
+  # Signal
   - pattern: "~/Library/Application Support/Signal/sql/db.sqlite"
-    allowed_programs:
-      - Signal
-    allowed_signers:
-      - "org.whispersystems.signal-desktop"
+    allow:
+      - base: "Signal"
+        team_id: "U68MSDN6DR"  # Signal
+        ppid: 1
 
   - pattern: "~/Library/Application Support/Signal/config.json"
-    allowed_programs:
-      - Signal
-    allowed_signers:
-      - "org.whispersystems.signal-desktop"
+    allow:
+      - base: "Signal"
+        team_id: "U68MSDN6DR"
+        ppid: 1
 
   # Brave Browser
   - pattern: "~/Library/Application Support/BraveSoftware/Brave-Browser/*/Login Data"
-    allowed_programs:
-      - "Brave Browser"
-      - brave
-    allowed_signers:
-      - "com.brave.Browser"
+    allow:
+      - base: "Brave Browser"
+        team_id: "KL8N8XSYF4"  # Brave
+        ppid: 1
 
   - pattern: "~/Library/Application Support/BraveSoftware/Brave-Browser/*/Cookies"
-    allowed_programs:
-      - "Brave Browser"
-      - brave
-    allowed_signers:
-      - "com.brave.Browser"
+    allow:
+      - base: "Brave Browser"
+        team_id: "KL8N8XSYF4"
+        ppid: 1
 
   # Edge Browser
   - pattern: "~/Library/Application Support/Microsoft Edge/*/Login Data"
-    allowed_programs:
-      - "Microsoft Edge"
-      - msedge
-    allowed_signers:
-      - "com.microsoft.edgemac"
+    allow:
+      - base: "Microsoft Edge"
+        team_id: "UBF8T346G9"  # Microsoft
+        ppid: 1
 
   - pattern: "~/Library/Application Support/Microsoft Edge/*/Cookies"
-    allowed_programs:
-      - "Microsoft Edge"
-      - msedge
-    allowed_signers:
-      - "com.microsoft.edgemac"
+    allow:
+      - base: "Microsoft Edge"
+        team_id: "UBF8T346G9"
+        ppid: 1
 
   # Opera Browser
   - pattern: "~/Library/Application Support/com.operasoftware.Opera/Login Data"
-    allowed_programs:
-      - Opera
-    allowed_signers:
-      - "com.operasoftware.Opera"
+    allow:
+      - base: "Opera"
+        team_id: "A2P9LX4JPN"  # Opera
+        ppid: 1
 
   - pattern: "~/Library/Application Support/com.operasoftware.Opera/Cookies"
-    allowed_programs:
-      - Opera
-    allowed_signers:
-      - "com.operasoftware.Opera"
+    allow:
+      - base: "Opera"
+        team_id: "A2P9LX4JPN"
+        ppid: 1
 
   # FileZilla
   - pattern: "~/.config/filezilla/recentservers.xml"
-    allowed_programs:
-      - filezilla
-      - FileZilla
+    allow:
+      - base: "filezilla"
+        ppid: 1
+      - base: "FileZilla"
+        ppid: 1
 
   - pattern: "~/.config/filezilla/sitemanager.xml"
-    allowed_programs:
-      - filezilla
-      - FileZilla
+    allow:
+      - base: "filezilla"
+        ppid: 1
+      - base: "FileZilla"
+        ppid: 1
 
   # Authy Desktop
   - pattern: "~/Library/Application Support/Authy Desktop/Local Storage/leveldb/*"
-    allowed_programs:
-      - "Authy Desktop"
-    allowed_signers:
-      - "com.authy.authy-desktop"
+    allow:
+      - base: "Authy Desktop"
+        team_id: "9EVH9FK6WT"  # Twilio
+        ppid: 1
 
   # Steam
   - pattern: "~/Library/Application Support/Steam/config/loginusers.vdf"
-    allowed_programs:
-      - steam
-      - Steam
-    allowed_signers:
-      - "com.valvesoftware.steam"
+    allow:
+      - base: "steam"
+        ppid: 1
+      - base: "Steam"
+        team_id: "MXGJJ98X76"  # Valve
+        ppid: 1
 
   # Battle.net
   - pattern: "~/Library/Application Support/Battle.net/Account/*"
-    allowed_programs:
-      - "Battle.net"
-    allowed_signers:
-      - "com.blizzard.battle.net"
+    allow:
+      - base: "Battle.net"
+        team_id: "L2JLF47G6D"  # Blizzard
+        ppid: 1
 
   # Notion
   - pattern: "~/Library/Application Support/Notion/notion.db"
-    allowed_programs:
-      - Notion
-    allowed_signers:
-      - "notion.id"
+    allow:
+      - base: "Notion"
+        team_id: "LBQJ96R89F"  # Notion
+        ppid: 1
 
-  # TablePlus Database Credentials
+  # TablePlus
   - pattern: "~/Library/Application Support/com.tinyapp.TablePlus/Data/Connections.plist"
-    allowed_programs:
-      - TablePlus
-    allowed_signers:
-      - "com.tinyapp.TablePlus"
+    allow:
+      - base: "TablePlus"
+        team_id: "3X57WD8ENQ"  # TablePlus
+        ppid: 1
 
-  # Sequel Pro Database Credentials
+  # Sequel Pro
   - pattern: "~/Library/Application Support/Sequel Pro/Data/Favorites.plist"
-    allowed_programs:
-      - "Sequel Pro"
-    allowed_signers:
-      - "com.sequelpro.SequelPro"
+    allow:
+      - base: "Sequel Pro"
+        ppid: 1
 
-  # DBeaver Connections
+  # DBeaver
   - pattern: "~/.dbeaver/credentials-config.json"
-    allowed_programs:
-      - dbeaver
-      - DBeaver
+    allow:
+      - base: "dbeaver"
+        ppid: 1
+      - base: "DBeaver"
+        ppid: 1
 
-  # Postman Collections/Environments
+  # Postman
   - pattern: "~/Library/Application Support/Postman/storage/*"
-    allowed_programs:
-      - Postman
-    allowed_signers:
-      - "com.postmanlabs.mac"
+    allow:
+      - base: "Postman"
+        team_id: "H7LP8A9S8Q"  # Postman
+        ppid: 1
 
-  # Insomnia REST Client
+  # Insomnia
   - pattern: "~/Library/Application Support/Insomnia/insomnia.*.db"
-    allowed_programs:
-      - Insomnia
-    allowed_signers:
-      - "com.insomnia.app"
+    allow:
+      - base: "Insomnia"
+        team_id: "FX44YY62GV"  # Kong
+        ppid: 1
 
   # RDP Connection Files
   - pattern: "~/Documents/*.rdp"
-    allowed_programs:
-      - "Microsoft Remote Desktop"
-    allowed_signers:
-      - "com.microsoft.rdc.macos"
+    allow:
+      - base: "Microsoft Remote Desktop"
+        team_id: "UBF8T346G9"  # Microsoft
+        ppid: 1
 
   # VPN Configurations
   - pattern: "~/Library/Application Support/Viscosity/OpenVPN/*"
-    allowed_programs:
-      - Viscosity
-    allowed_signers:
-      - "com.viscosityvpn.Viscosity"
+    allow:
+      - base: "Viscosity"
+        team_id: "34XR7GXFPX"  # SparkLabs
+        ppid: 1
 
   - pattern: "~/Library/Application Support/Tunnelblick/Configurations/*"
-    allowed_programs:
-      - Tunnelblick
-    allowed_signers:
-      - "net.tunnelblick.tunnelblick"
+    allow:
+      - base: "Tunnelblick"
+        ppid: 1
 
-  # Cyberduck Bookmarks
+  # Cyberduck
   - pattern: "~/Library/Group Containers/G69SCX94XU.duck/Library/Application Support/duck/Bookmarks/*"
-    allowed_programs:
-      - Cyberduck
-    allowed_signers:
-      - "ch.sudo.cyberduck"
+    allow:
+      - base: "Cyberduck"
+        team_id: "G69SCX94XU"  # iterate
+        ppid: 1
 
-  # Transmit FTP
+  # Transmit
   - pattern: "~/Library/Application Support/Transmit/Favorites/*"
-    allowed_programs:
-      - Transmit
-    allowed_signers:
-      - "com.panic.Transmit"
+    allow:
+      - base: "Transmit"
+        team_id: "VE8FC488U5"  # Panic
+        ppid: 1
 
   # GitHub Desktop
   - pattern: "~/Library/Application Support/GitHub Desktop/storage/userData.json"
-    allowed_programs:
-      - "GitHub Desktop"
-    allowed_signers:
-      - "com.github.GitHubClient"
+    allow:
+      - base: "GitHub Desktop"
+        team_id: "VEKTX9H2N7"  # GitHub
+        ppid: 1
 
-  # Sourcetree
+  # SourceTree
   - pattern: "~/Library/Application Support/SourceTree/accounts.json"
-    allowed_programs:
-      - SourceTree
-    allowed_signers:
-      - "com.torusknot.SourceTreeNotMAS"
+    allow:
+      - base: "SourceTree"
+        team_id: "UPXU4CQZ5P"  # Atlassian
+        ppid: 1
 
   # GitKraken
   - pattern: "~/.gitkraken/profiles/*"
-    allowed_programs:
-      - GitKraken
-    allowed_signers:
-      - "com.axosoft.gitkraken"
+    allow:
+      - base: "GitKraken"
+        team_id: "HV6GQZR9ZK"  # Axosoft
+        ppid: 1
+
+  # Shell History Files
+  - pattern: "~/.bash_history"
+    allow:
+      - base: "bash"
+      - base: "sh"
+
+  - pattern: "~/.zsh_history"
+    allow:
+      - base: "zsh"
+      - base: "sh"
+
+  - pattern: "~/.history"
+    allow:
+      - base: "csh"
+      - base: "tcsh"
+      - base: "sh"
+
+  - pattern: "~/.fish_history"
+    allow:
+      - base: "fish"
+
+  - pattern: "~/.local/share/fish/fish_history"
+    allow:
+      - base: "fish"
+
+  # PowerShell History
+  - pattern: "~/.local/share/powershell/PSReadLine/ConsoleHost_history.txt"
+    allow:
+      - base: "pwsh"
+      - base: "powershell"
+        path_pattern: "/usr/local/microsoft/powershell/*/pwsh"
+        team_id: "UBF8T346G9"  # Microsoft
 
   # Environment files
   - pattern: "~/.env"
-    allowed_programs:
-      - code
-      - vim
-      - nvim
-      - emacs
-      - nano
-    allowed_signers:
-      - "com.microsoft.VSCode"
+    allow:
+      # VS Code
+      - base: "code"
+        team_id: "UBF8T346G9"  # Microsoft
+      # Command-line editors
+      - base: "vim"
+      - base: "nvim"
+      - base: "emacs"
+      - base: "nano"
 
   - pattern: "~/*/.env"
-    allowed_programs:
-      - code
-      - vim
-      - nvim
-      - node
-      - python
-      - python3
-    allowed_signers:
-      - "com.microsoft.VSCode"
+    allow:
+      - base: "code"
+        team_id: "UBF8T346G9"
+      - base: "vim"
+      - base: "nvim"
+      - base: "node"
+      - base: "python"
+      - base: "python3"
 
   - pattern: "~/*/.env.local"
-    allowed_programs:
-      - code
-      - vim
-      - nvim
-      - node
-      - python
-      - python3
-    allowed_signers:
-      - "com.microsoft.VSCode"
+    allow:
+      - base: "code"
+        team_id: "UBF8T346G9"
+      - base: "vim"
+      - base: "nvim"
+      - base: "node"
+      - base: "python"
+      - base: "python3"
 
   # GitHub CLI
   - pattern: "~/.config/gh/hosts.yml"
-    allowed_programs:
-      - gh
+    allow:
+      - base: "gh"
 
-  # Heroku CLI
+      # GitHub CLI from Homebrew Cellar (versioned paths)
+      - base: "gh"
+        path_pattern: "/opt/homebrew/Cellar/gh/*/bin/*"
+
+  # Network authentication files
   - pattern: "~/.netrc"
-    allowed_programs:
-      - heroku
-      - curl
-      - wget
-      - git
+    allow:
+      # Cloud CLIs
+      - base: "heroku"
+      # Network tools
+      - base: "curl"
+      - base: "wget"
+      - base: "ftp"
+      - base: "git"
+      - base: "lftp"
+      # Email clients
+      - base: "mutt"
+      - base: "pine"
+      - base: "alpine"
+      # Command-line editors (may edit the file)
+      - base: "vim"
+      - base: "nvim"
+      - base: "emacs"
+      - base: "nano"
 
   # Netlify CLI
   - pattern: "~/.netlify/config.json"
-    allowed_programs:
-      - netlify
-      - ntl
+    allow:
+      - base: "netlify"
+      - base: "ntl"
 
   # Vercel CLI
   - pattern: "~/.vercel/auth.json"
-    allowed_programs:
-      - vercel
-      - vc
+    allow:
+      - base: "vercel"
+      - base: "vc"
 
-  # Linux-specific paths
+  # Linux-specific paths (keeping legacy format for Linux compatibility)
   - pattern: "~/.local/share/keyrings/*.keyring"
-    allowed_programs:
-      - gnome-keyring-daemon
-      - seahorse
-      - secret-tool
+    allow:
+      - base: "gnome-keyring-daemon"
+      - base: "seahorse"
+      - base: "secret-tool"
 
   - pattern: "~/.config/google-chrome/*/Login Data"
-    allowed_programs:
-      - chrome
-      - google-chrome
-      - google-chrome-stable
+    allow:
+      - base: "chrome"
+      - base: "google-chrome"
+      - base: "google-chrome-stable"
 
   - pattern: "~/.config/google-chrome/*/Cookies"
-    allowed_programs:
-      - chrome
-      - google-chrome
-      - google-chrome-stable
+    allow:
+      - base: "chrome"
+      - base: "google-chrome"
+      - base: "google-chrome-stable"
 
   # Chrome Beta on Linux
   - pattern: "~/.config/google-chrome-beta/*/Login Data"
-    allowed_programs:
-      - chrome-beta
-      - google-chrome-beta
+    allow:
+      - base: "chrome-beta"
+      - base: "google-chrome-beta"
 
   - pattern: "~/.config/google-chrome-beta/*/Cookies"
-    allowed_programs:
-      - chrome-beta
-      - google-chrome-beta
+    allow:
+      - base: "chrome-beta"
+      - base: "google-chrome-beta"
 
   - pattern: "~/.config/google-chrome-beta/*/Web Data"
-    allowed_programs:
-      - chrome-beta
-      - google-chrome-beta
+    allow:
+      - base: "chrome-beta"
+      - base: "google-chrome-beta"
 
   # Chrome Dev/Canary on Linux (called 'unstable')
   - pattern: "~/.config/google-chrome-unstable/*/Login Data"
-    allowed_programs:
-      - chrome-unstable
-      - google-chrome-unstable
+    allow:
+      - base: "chrome-unstable"
+      - base: "google-chrome-unstable"
 
   - pattern: "~/.config/google-chrome-unstable/*/Cookies"
-    allowed_programs:
-      - chrome-unstable
-      - google-chrome-unstable
+    allow:
+      - base: "chrome-unstable"
+      - base: "google-chrome-unstable"
 
   - pattern: "~/.config/google-chrome-unstable/*/Web Data"
-    allowed_programs:
-      - chrome-unstable
-      - google-chrome-unstable
+    allow:
+      - base: "chrome-unstable"
+      - base: "google-chrome-unstable"
 
   - pattern: "~/.mozilla/firefox/*/logins.json"
-    allowed_programs:
-      - firefox
-      - firefox-bin
+    allow:
+      - base: "firefox"
+      - base: "firefox-bin"
 
   - pattern: "~/.mozilla/firefox/*/cookies.sqlite"
-    allowed_programs:
-      - firefox
-      - firefox-bin
+    allow:
+      - base: "firefox"
+      - base: "firefox-bin"
 
   # Zen Browser on Linux
   - pattern: "~/.zen/*/profiles/*/logins.json"
-    allowed_programs:
-      - zen
-      - zen-browser
+    allow:
+      - base: "zen"
+      - base: "zen-browser"
 
   - pattern: "~/.zen/*/profiles/*/key*.db"
-    allowed_programs:
-      - zen
-      - zen-browser
+    allow:
+      - base: "zen"
+      - base: "zen-browser"
 
   - pattern: "~/.zen/*/profiles/*/cookies.sqlite"
-    allowed_programs:
-      - zen
-      - zen-browser
+    allow:
+      - base: "zen"
+      - base: "zen-browser"
 
   - pattern: "~/.config/zen/*/profiles/*/logins.json"
-    allowed_programs:
-      - zen
-      - zen-browser
+    allow:
+      - base: "zen"
+      - base: "zen-browser"
 
   - pattern: "~/.config/zen/*/profiles/*/key*.db"
-    allowed_programs:
-      - zen
-      - zen-browser
+    allow:
+      - base: "zen"
+      - base: "zen-browser"
 
   - pattern: "~/.config/zen/*/profiles/*/cookies.sqlite"
-    allowed_programs:
-      - zen
-      - zen-browser
+    allow:
+      - base: "zen"
+      - base: "zen-browser"
 
   - pattern: "~/.thunderbird/*/logins.json"
-    allowed_programs:
-      - thunderbird
+    allow:
+      - base: "thunderbird"
 
   - pattern: "~/.config/discord/Local Storage/leveldb/*"
-    allowed_programs:
-      - discord
-      - Discord
+    allow:
+      - base: "discord"
+      - base: "Discord"
 
   - pattern: "~/.config/Slack/Cookies"
-    allowed_programs:
-      - slack
+    allow:
+      - base: "slack"
 
   - pattern: "~/.config/Code/User/globalStorage/*"
-    allowed_programs:
-      - code
-      - code-oss
+    allow:
+      - base: "code"
+      - base: "code-oss"
+
+  # Linux server secrets (actual credentials/private keys)
+  - pattern: "/etc/shadow"
+    allow:
+      # System authentication tools
+      - base: "passwd"
+      - base: "chpasswd"
+      - base: "usermod"
+      - base: "vipw"
+      - base: "pwck"
+      # PAM modules
+      - team_id: "system"
+        uid: 0
+
+  - pattern: "/etc/gshadow"
+    allow:
+      - base: "gpasswd"
+      - base: "vigr"
+      - base: "grpck"
+      - team_id: "system"
+        uid: 0
+
+  - pattern: "/etc/ssh/ssh_host_*_key"
+    allow:
+      - base: "sshd"
+      - base: "ssh-keygen"
+      - team_id: "system"
+        uid: 0
+
+  - pattern: "/etc/ssl/private/*"
+    allow:
+      # Web servers
+      - base: "nginx"
+      - base: "apache2"
+      - base: "httpd"
+      # Load balancers
+      - base: "haproxy"
+      # System SSL tools
+      - base: "openssl"
+      - team_id: "system"
+        uid: 0
+
+  - pattern: "/etc/pki/private/*"
+    allow:
+      - base: "nginx"
+      - base: "apache2"
+      - base: "httpd"
+      - base: "haproxy"
+      - base: "openssl"
+      - team_id: "system"
+        uid: 0
+
+  - pattern: "/root/.ssh/id_*"
+    allow:
+      - base: "ssh"
+      - base: "ssh-add"
+      - base: "ssh-agent"
+      - base: "ssh-keygen"
+      - base: "scp"
+      - base: "rsync"
+      - uid: 0
+
+  - pattern: "/home/*/.ssh/id_*"
+    allow:
+      - base: "ssh"
+      - base: "ssh-add"
+      - base: "ssh-agent"
+      - base: "ssh-keygen"
+      - base: "scp"
+      - base: "rsync"
+
+  - pattern: "/etc/mysql/debian.cnf"
+    allow:
+      - base: "mysql"
+      - base: "mysqld"
+      - base: "mariadb"
+      - team_id: "system"
+        uid: 0
+
+  - pattern: "/var/lib/postgresql/.pgpass"
+    allow:
+      - base: "postgres"
+      - base: "psql"
+      - base: "pg_dump"
+      - base: "pg_restore"
 
 # Patterns to exclude from monitoring (reduce noise)
 excluded_patterns:
@@ -1006,8 +1113,8 @@ excluded_patterns:
   - "*.log"           # Log files
   - "*.tmp"           # Temporary files
 
-# Platform-specific allowed paths for executables
-allowed_paths:
+# Platform-specific default paths for base-only rules
+default_base_paths:
   macos:
     - /usr/bin
     - /bin
@@ -1018,6 +1125,8 @@ allowed_paths:
     - /usr/local/sbin
     - /opt/homebrew/bin
     - /opt/homebrew/sbin
+    - /opt/homebrew/Cellar/*/bin
+    - /opt/homebrew/Cellar/*/sbin
     - /Applications/*/Contents/MacOS
     - ~/Applications/*/Contents/MacOS
     - /System/Applications/*/Contents/MacOS
@@ -1034,12 +1143,69 @@ allowed_paths:
     - /var/lib/flatpak/exports/bin
     - ~/.local/bin
 
-# Global allow rules based on signing (macOS only)
-# These signers are trusted for any protected file
-global_trusted_signers:
-  - "com.apple.security"      # Apple's security tools
-  - "com.apple.SecurityAgent"  # Apple's security agent
-  - "Developer ID Application: Microsoft Corporation" # VS Code and other MS tools
+  freebsd:
+    - /usr/bin
+    - /bin
+    - /usr/sbin
+    - /sbin
+    - /usr/local/bin
+    - /usr/local/sbin
+    - /usr/pkg/bin
+    - /usr/pkg/sbin
+    - /usr/ports/*/work/stage/usr/local/bin
+    - ~/.local/bin
+    - /usr/home/*/.cargo/bin
+    - /usr/home/*/go/bin
+
+  netbsd:
+    - /usr/bin
+    - /bin
+    - /usr/sbin
+    - /sbin
+    - /usr/pkg/bin
+    - /usr/pkg/sbin
+    - /usr/X11R7/bin
+    - ~/.local/bin
+    - /home/*/.cargo/bin
+    - /home/*/go/bin
+
+  openbsd:
+    - /usr/bin
+    - /bin
+    - /usr/sbin
+    - /sbin
+    - /usr/local/bin
+    - /usr/local/sbin
+    - /usr/X11R6/bin
+    - ~/.local/bin
+    - /home/*/.cargo/bin
+    - /home/*/go/bin
+
+  illumos:
+    - /usr/bin
+    - /bin
+    - /usr/sbin
+    - /sbin
+    - /opt/local/bin
+    - /opt/local/sbin
+    - /usr/gnu/bin
+    - /opt/ooce/bin
+    - ~/.local/bin
+    - /export/home/*/.cargo/bin
+    - /export/home/*/go/bin
+
+  solaris:
+    - /usr/bin
+    - /bin
+    - /usr/sbin
+    - /sbin
+    - /opt/csw/bin
+    - /opt/csw/sbin
+    - /usr/sfw/bin
+    - /usr/gnu/bin
+    - ~/.local/bin
+    - /export/home/*/.cargo/bin
+    - /export/home/*/go/bin
 
 # Monitoring configuration
 monitoring:
@@ -1053,3 +1219,4 @@ monitoring:
 
   # Maximum events per second (rate limiting)
   max_events_per_sec: 10000
+

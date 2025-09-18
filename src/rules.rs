@@ -1,4 +1,5 @@
 use crate::config::Config;
+use crate::process_context::ProcessContext;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -55,7 +56,59 @@ impl RuleEngine {
             .collect()
     }
 
-    /// Check if a process is allowed to access a file
+    /// Check if a process is allowed to access a file (new API)
+    #[allow(dead_code)]  // Will be used when monitor is updated
+    pub fn check_access_with_context(&self, context: &ProcessContext, file_path: &Path) -> Decision {
+        // First check runtime exceptions
+        let exception_key = (context.path.clone(), file_path.to_path_buf());
+        if let Some(expires_at) = self.runtime_exceptions.get(&exception_key) {
+            if expires_at.is_none_or(|exp| Instant::now() < exp) {
+                log::debug!("Access allowed by runtime exception");
+                return Decision::Allow;
+            }
+        }
+
+        // Find the protection rule that matches this file
+        for protected_file in &self.config.protected_files {
+            let expanded_pattern = shellexpand::tilde(&protected_file.pattern);
+            if let Ok(pattern) = glob::Pattern::new(&expanded_pattern) {
+                if pattern.matches_path(file_path) {
+                    // First check new allow rules
+                    if !protected_file.allow_rules.is_empty() {
+                        for rule in &protected_file.allow_rules {
+                            if rule.matches_with_config(
+                                &context.path,
+                                context.ppid,
+                                context.team_id.as_deref(),
+                                context.app_id.as_deref(),
+                                context.args.as_deref(),
+                                context.uid,
+                                Some(&self.config),
+                            ) {
+                                log::debug!("Process allowed by allow rule");
+                                return Decision::Allow;
+                            }
+                        }
+                        // No rules matched
+                        return Decision::Deny;
+                    }
+
+                    // Fall back to legacy allowed_programs and allowed_signers
+                    return self.check_process_allowed(
+                        &context.path,
+                        &protected_file.allowed_programs,
+                        &protected_file.allowed_signers,
+                        &context.signing_info_display(),
+                    );
+                }
+            }
+        }
+
+        // If no pattern matched, allow by default
+        Decision::Allow
+    }
+
+    /// Check if a process is allowed to access a file (legacy API)
     pub fn check_access(&self, process_path: &Path, file_path: &Path, signing_info: Option<&str>) -> Decision {
         // First check runtime exceptions
         let exception_key = (process_path.to_path_buf(), file_path.to_path_buf());
@@ -75,7 +128,7 @@ impl RuleEngine {
                         process_path,
                         &protected_file.allowed_programs,
                         &protected_file.allowed_signers,
-                        signing_info,
+                        signing_info.unwrap_or(""),
                     );
                 }
             }
@@ -90,21 +143,13 @@ impl RuleEngine {
         process_path: &Path,
         allowed_programs: &[String],
         allowed_signers: &[String],
-        signing_info: Option<&str>,
+        signing_info: &str,
     ) -> Decision {
-        // First check if this is trusted by signing (macOS only)
-        if let Some(signer) = signing_info {
-            // Check global trusted signers
-            for trusted_signer in &self.config.global_trusted_signers {
-                if signer.contains(trusted_signer) {
-                    log::debug!("Process allowed by global trusted signer: {}", trusted_signer);
-                    return Decision::Allow;
-                }
-            }
-
+        // Check if this is trusted by signing (macOS only)
+        if !signing_info.is_empty() {
             // Check file-specific allowed signers
             for allowed_signer in allowed_signers {
-                if signer.contains(allowed_signer) {
+                if signing_info.contains(allowed_signer) {
                     log::debug!("Process allowed by signer: {}", allowed_signer);
                     return Decision::Allow;
                 }

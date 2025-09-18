@@ -1,13 +1,21 @@
 #![deny(warnings)]
 
+mod allow_rule;
 mod cli;
 mod config;
 mod defaults;
 mod monitor;
+mod process_context;
 mod rules;
 
 #[cfg(target_os = "linux")]
 mod linux_monitor;
+
+#[cfg(target_os = "freebsd")]
+mod freebsd_monitor;
+
+#[cfg(any(target_os = "freebsd", target_os = "netbsd", target_os = "illumos", target_os = "solaris"))]
+mod dtrace_monitor;
 
 use anyhow::Result;
 use clap::Parser;

@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use crate::allow_rule::AllowRule;
 
 // Embed the default configuration at compile time
 const DEFAULT_CONFIG_YAML: &str = include_str!("../config/default.yaml");
@@ -7,25 +8,44 @@ const DEFAULT_CONFIG_YAML: &str = include_str!("../config/default.yaml");
 pub struct Config {
     pub protected_files: Vec<ProtectedFile>,
     pub excluded_patterns: Vec<String>,
-    pub allowed_paths: AllowedPaths,
-    pub global_trusted_signers: Vec<String>,
+    #[serde(alias = "allowed_paths")]  // For backward compatibility
+    pub default_base_paths: DefaultBasePaths,
     pub monitoring: MonitoringConfig,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ProtectedFile {
     pub pattern: String,
+
+    /// Legacy: Simple allowed programs list (backwards compatibility)
+    #[serde(default)]
     pub allowed_programs: Vec<String>,
+
+    /// Legacy: Simple allowed signers list (backwards compatibility)
     #[serde(default)]
     pub allowed_signers: Vec<String>,
+
+    /// New: Flexible allow rules with AND/OR logic
+    #[serde(default, rename = "allow")]
+    pub allow_rules: Vec<AllowRule>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct AllowedPaths {
+pub struct DefaultBasePaths {
     #[serde(default)]
     pub macos: Vec<String>,
     #[serde(default)]
     pub linux: Vec<String>,
+    #[serde(default)]
+    pub freebsd: Vec<String>,
+    #[serde(default)]
+    pub netbsd: Vec<String>,
+    #[serde(default)]
+    pub openbsd: Vec<String>,
+    #[serde(default)]
+    pub illumos: Vec<String>,
+    #[serde(default)]
+    pub solaris: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -71,7 +91,7 @@ impl Config {
     /// Get allowed signers for a given file pattern
     #[allow(dead_code)]  // API method for future use
     pub fn get_allowed_signers(&self, file_path: &str) -> Vec<String> {
-        let mut allowed = self.global_trusted_signers.clone();
+        let mut allowed = Vec::new();
 
         for protected in &self.protected_files {
             if self.matches_pattern(&protected.pattern, file_path) {
@@ -96,23 +116,56 @@ impl Config {
             .unwrap_or(false)
     }
 
-    /// Check if a path is in the allowed executable paths
+    /// Check if a path is in the default basename paths
     pub fn is_allowed_path(&self, path: &std::path::Path) -> bool {
         let path_str = path.to_string_lossy();
 
         #[cfg(target_os = "macos")]
-        let allowed_paths = &self.allowed_paths.macos;
+        let allowed_paths = &self.default_base_paths.macos;
 
         #[cfg(target_os = "linux")]
-        let allowed_paths = &self.allowed_paths.linux;
+        let allowed_paths = &self.default_base_paths.linux;
 
-        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+        #[cfg(target_os = "freebsd")]
+        let allowed_paths = &self.default_base_paths.freebsd;
+
+        #[cfg(target_os = "netbsd")]
+        let allowed_paths = &self.default_base_paths.netbsd;
+
+        #[cfg(target_os = "openbsd")]
+        let allowed_paths = &self.default_base_paths.openbsd;
+
+        #[cfg(target_os = "illumos")]
+        let allowed_paths = &self.default_base_paths.illumos;
+
+        #[cfg(target_os = "solaris")]
+        let allowed_paths = &self.default_base_paths.solaris;
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "linux",
+            target_os = "freebsd",
+            target_os = "netbsd",
+            target_os = "openbsd",
+            target_os = "illumos",
+            target_os = "solaris"
+        )))]
         let allowed_paths = &Vec::<String>::new();
 
         for allowed in allowed_paths {
             let expanded = shellexpand::tilde(allowed);
-            if path_str.starts_with(expanded.as_ref()) {
-                return true;
+            // Handle patterns with wildcards
+            if expanded.contains('*') {
+                if let Ok(pattern) = glob::Pattern::new(&expanded) {
+                    if pattern.matches(&path_str) {
+                        return true;
+                    }
+                }
+            } else {
+                // Simple prefix matching for paths without wildcards
+                if path_str.starts_with(expanded.as_ref()) {
+                    return true;
+                }
             }
         }
 

@@ -42,7 +42,7 @@ DEBUG_BINARY = target/debug/$(BINARY_NAME)
 OUT_BINARY = $(OUT_DIR)/$(BINARY_NAME)-$(PLATFORM)-$(UNAME_M)
 
 # Phony targets
-.PHONY: all help lint fmt check test build release clean install uninstall run-monitor run-interactive run-enforce
+.PHONY: all help lint fmt check test build release clean install uninstall monitor run-monitor run-interactive run-enforce
 
 ## Help
 help: ## Show this help message
@@ -169,6 +169,10 @@ uninstall: ## Uninstall the binary from system (requires sudo)
 	@echo "✓ Uninstalled"
 
 ## Running
+monitor: release ## Build release and run in monitor mode
+	@echo "Starting release binary in monitor mode..."
+	@sudo $(OUT_BINARY) --monitor
+
 run-monitor: build ## Run in monitor mode (log only)
 	@echo "Starting in monitor mode..."
 	@sudo $(DEBUG_BINARY) --monitor
