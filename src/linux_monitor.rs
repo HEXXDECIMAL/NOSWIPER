@@ -81,11 +81,16 @@ impl LinuxMonitor {
         let mut paths = Vec::new();
         let users = self.get_system_users();
 
+        log::debug!("Expanding patterns for {} users", users.len());
+
         // Process each protected file pattern from the YAML configuration
         for protected_file in &self.rule_engine.config.protected_files {
             for pattern_str in protected_file.patterns() {
                 // For each pattern, expand it for all users and find matching files
                 let expanded_paths = self.expand_pattern_for_users(&pattern_str, &users);
+                if !expanded_paths.is_empty() {
+                    log::debug!("Pattern '{}' matched {} files", pattern_str, expanded_paths.len());
+                }
                 paths.extend(expanded_paths);
             }
         }
@@ -94,6 +99,7 @@ impl LinuxMonitor {
         paths.sort();
         paths.dedup();
 
+        log::info!("Total protected files discovered: {}", paths.len());
         paths
     }
 
@@ -120,11 +126,13 @@ impl LinuxMonitor {
 
     /// Uses glob to find files matching a pattern
     fn glob_pattern(&self, pattern: &str) -> Vec<PathBuf> {
+        log::trace!("Checking pattern: {}", pattern);
         match glob::glob(pattern) {
             Ok(entries) => entries
                 .filter_map(|entry| match entry {
                     Ok(path) => {
                         if path.is_file() {
+                            log::trace!("  Found file: {}", path.display());
                             Some(path)
                         } else {
                             None
@@ -336,29 +344,31 @@ impl LinuxMonitor {
         }
 
         if successful_watches == 0 {
-            return Err(anyhow::anyhow!("No files could be monitored"));
-        }
+            log::warn!("No files are being monitored! Check that credential files exist.");
+            log::info!("Looking for patterns like: ~/.ssh/id_*, ~/.netrc, ~/.aws/credentials");
+            log::info!("Try creating test files: touch ~/.ssh/id_rsa ~/.netrc");
+        } else {
+            log::info!(
+                "Successfully monitoring {} files ({} failed)",
+                successful_watches,
+                failed_watches
+            );
 
-        log::info!(
-            "Successfully monitoring {} files ({} failed)",
-            successful_watches,
-            failed_watches
-        );
+            // Log first 20 watched files for verification
+            let watched_paths = self.watched_paths
+                .lock()
+                .map_err(|e| anyhow::anyhow!("Mutex lock poisoned: {}", e))?;
+            let mut watched_sorted = watched_paths.clone();
+            watched_sorted.sort();
 
-        // Log first 20 watched files for verification
-        let watched_paths = self.watched_paths
-            .lock()
-            .map_err(|e| anyhow::anyhow!("Mutex lock poisoned: {}", e))?;
-        let mut watched_sorted = watched_paths.clone();
-        watched_sorted.sort();
+            log::info!("Monitored credential files:");
+            for (i, path) in watched_sorted.iter().take(20).enumerate() {
+                log::info!("  {}: {}", i + 1, path.display());
+            }
 
-        log::info!("Sample of monitored files:");
-        for (i, path) in watched_sorted.iter().take(20).enumerate() {
-            log::info!("  {}: {}", i + 1, path.display());
-        }
-
-        if watched_sorted.len() > 20 {
-            log::info!("  ... and {} more files", watched_sorted.len() - 20);
+            if watched_sorted.len() > 20 {
+                log::info!("  ... and {} more files", watched_sorted.len() - 20);
+            }
         }
 
         Ok(())
