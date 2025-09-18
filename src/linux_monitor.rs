@@ -60,11 +60,12 @@ pub struct LinuxMonitor {
 }
 
 impl LinuxMonitor {
-    pub fn new(mode: Mode, verbose: bool, stop_parent: bool) -> Self {
+    pub fn new(mode: Mode, verbose: bool, stop_parent: bool) -> Result<Self> {
         // Load config from embedded YAML
-        let config = Config::default().expect("Failed to load default config");
+        let config = Config::default()
+            .map_err(|e| anyhow::anyhow!("Failed to load default config: {}", e))?;
 
-        Self {
+        Ok(Self {
             rule_engine: RuleEngine::new(config),
             mode,
             verbose,
@@ -72,7 +73,7 @@ impl LinuxMonitor {
             fanotify_fd: None,
             watched_paths: Arc::new(Mutex::new(Vec::new())),
             pid_cache: HashMap::new(),
-        }
+        })
     }
 
     /// Discovers protected files by expanding patterns from the configuration
@@ -425,7 +426,10 @@ impl LinuxMonitor {
             }
 
             if self.add_file_watch(fd, file_path)? {
-                self.watched_paths.lock().unwrap().push(file_path.clone());
+                self.watched_paths
+                    .lock()
+                    .map_err(|e| anyhow::anyhow!("Mutex lock poisoned: {}", e))?
+                    .push(file_path.clone());
                 successful_watches += 1;
             } else {
                 failed_watches += 1;
@@ -443,7 +447,9 @@ impl LinuxMonitor {
         );
 
         // Log first 20 watched files for verification
-        let watched_paths = self.watched_paths.lock().unwrap();
+        let watched_paths = self.watched_paths
+            .lock()
+            .map_err(|e| anyhow::anyhow!("Mutex lock poisoned: {}", e))?;
         let mut watched_sorted = watched_paths.clone();
         watched_sorted.sort();
 
@@ -521,7 +527,13 @@ impl LinuxMonitor {
 
                 // Check which files are not yet being watched
                 {
-                    let watched = watched_paths.lock().unwrap();
+                    let watched = match watched_paths.lock() {
+                        Ok(guard) => guard,
+                        Err(e) => {
+                            log::error!("Mutex lock poisoned during file discovery: {}", e);
+                            continue;
+                        }
+                    };
                     for file_path in current_files {
                         if !watched.contains(&file_path) && file_path.exists() {
                             new_files.push(file_path);
@@ -535,9 +547,16 @@ impl LinuxMonitor {
                     let mut successful_new_watches = 0;
                     for file_path in new_files {
                         if let Ok(true) = temp_monitor.add_file_watch(fd, &file_path) {
-                            watched_paths.lock().unwrap().push(file_path.clone());
-                            successful_new_watches += 1;
-                            log::info!("Added watch for new file: {}", file_path.display());
+                            match watched_paths.lock() {
+                                Ok(mut guard) => {
+                                    guard.push(file_path.clone());
+                                    successful_new_watches += 1;
+                                    log::info!("Added watch for new file: {}", file_path.display());
+                                }
+                                Err(e) => {
+                                    log::error!("Failed to update watched paths: {}", e);
+                                }
+                            }
                         }
                     }
 
