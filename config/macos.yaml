@@ -9,9 +9,11 @@
 # Without path_pattern or team_id, a rule could match any process!
 global_exclusions:
   # Apple system processes from /System/* (like mdworker_shared, Safari services, etc.)
+  # These system services typically run as root (EUID 0) or system users
   - app_id: "com.apple.*"
     path_pattern: "/System/*"
     ppid: 1
+    euid: 0-500  # System and daemon users
 
   # Popular backup programs (GUI apps must have ppid=1)
   - base: "syncthing"
@@ -61,19 +63,30 @@ protected_files:
     allow:
       # SSH tools from system paths only
       - base: "ssh"
+        euid: 501-599  # Regular user accounts on macOS
       - base: "ssh-add"
+        euid: 501-599
       - base: "ssh-agent"
+        euid: 501-599
       - base: "ssh-keygen"
+        euid: 501-599
       - base: "scp"
+        euid: 501-599
       - base: "sftp"
+        euid: 501-599
       - base: "sshd"
+        euid: 0  # Root for system SSH daemon
       - base: "git"
+        euid: 501-599
       - base: "rsync"
+        euid: 501-599
       # GitHub Desktop by team ID
       - team_id: "VEKTX9H2N7"  # GitHub Desktop
+        euid: 501-599
       # GitHub CLI from Homebrew Cellar (versioned paths)
       - base: "gh"
         path_pattern: "/opt/homebrew/Cellar/gh/*/bin/*"
+        euid: 501-599
 
   # SSH Known Hosts (used for lateral movement/reconnaissance)
   - id: ssh_known_hosts
@@ -81,16 +94,24 @@ protected_files:
     allow:
       # SSH tools that actually read/write known_hosts
       - base: "ssh"
+        euid: 501-599
       - base: "ssh-keygen"
+        euid: 501-599
       - base: "ssh-keyscan"
+        euid: 501-599
       - base: "scp"
+        euid: 501-599
       - base: "sftp"
+        euid: 501-599
       # Git (updates known_hosts when cloning)
       - base: "git"
+        euid: 501-599
       # rsync over SSH
       - base: "rsync"
+        euid: 501-599
       # Zsh (reads known_hosts for tab completion)
       - base: "zsh"
+        euid: 501-599
 
   # AWS Credentials
   - id: aws_credentials
@@ -100,19 +121,27 @@ protected_files:
     allow:
       # AWS CLI from standard locations
       - base: "aws"
+        euid: 501-599
       # Terraform by team ID
       - team_id: "D38WU7D763"  # HashiCorp
+        euid: 501-599
       # Ansible
       - base: "ansible"
+        euid: 501-599
       - base: "ansible-playbook"
+        euid: 501-599
       # Packer
       - base: "packer"
+        euid: 501-599
       # Python for boto3 - must be from specific locations
       - base: "python"
+        euid: 501-599
       - base: "python3"
         path_pattern: "~/.venv/*/bin/*"
+        euid: 501-599
       - base: "python3"
         path_pattern: "~/.*env/bin/*"
+        euid: 501-599
 
   # Google Cloud
   - id: gcloud_credentials
@@ -122,14 +151,21 @@ protected_files:
     allow:
       # Google Cloud SDK tools
       - base: "gcloud"
+        euid: 501-599
       - base: "gsutil"
+        euid: 501-599
       - base: "bq"
+        euid: 501-599
       - base: "kubectl"
+        euid: 501-599
       # Python used by gcloud
       - base: "python"
+        euid: 501-599
       - base: "python3"
+        euid: 501-599
       - base: "Python"  # macOS Python wrapper
         app_id: "com.apple.python3"
+        euid: 501-599
 
   # Azure
   - id: azure_credentials
@@ -321,17 +357,23 @@ protected_files:
       - app_id: "com.apple.*"
         path_pattern: "/System/*"
 
-      # Any legitimate app from standard app locations with ppid=1
+      # Any legitimate app from standard app locations with ppid=1 and user EUID
+      # EUID range 501-599 represents regular user accounts on macOS
       - path_pattern: "/Applications/*.app/Contents/MacOS/*"
         ppid: 1
+        euid: 501-599
       - path_pattern: "/Applications/*/*.app/Contents/MacOS/*"
         ppid: 1
+        euid: 501-599
       - path_pattern: "/System/Applications/*/*.app/Contents/MacOS/*"
         ppid: 1
+        euid: 501-599
       - path_pattern: "~/Applications/*/*.app/Contents/MacOS/*"
         ppid: 1
+        euid: 501-599
       - path_pattern: "/Applications/Utilities/*/*.app/Contents/MacOS/*"
         ppid: 1
+        euid: 501-599
 
       # Homebrew Cask apps
       - path_pattern: "/opt/homebrew/Caskroom/*/*.app/Contents/MacOS/*"
@@ -410,6 +452,204 @@ protected_files:
   - pattern: "~/.config/filezilla/recentservers.xml"
     allow:
       - team_id: "PBF8WR8TCB"  # FileZilla
+
+  # Shell History Files (often contain passwords in commands)
+  - id: shell_history
+    patterns:
+      - "~/.bash_history"
+      - "~/.zsh_history"
+      - "~/.fish_history"
+      - "~/.history"
+    allow:
+      # Only shells should access history files
+      - base: "bash"
+        euid: 501-599
+      - base: "zsh"
+        euid: 501-599
+      - base: "fish"
+        euid: 501-599
+      - base: "sh"
+        euid: 501-599
+      - base: "tcsh"
+        euid: 501-599
+      # Terminal emulators that might read history
+      - base: "Terminal"
+        app_id: "com.apple.*"
+        euid: 501-599
+      - base: "iTerm*"
+        team_id: "H7V7XYVQ7D"  # iTerm2
+        euid: 501-599
+      - base: "wezterm*"
+        euid: 501-599
+      - base: "kitty"
+        euid: 501-599
+      - base: "alacritty"
+        euid: 501-599
+
+  # Environment files with API keys and secrets
+  - id: env_files
+    patterns:
+      - "~/.env"
+      - "~/.envrc"
+      - "~/**/.env"
+      - "~/**/.env.*"
+    allow:
+      # Development tools that legitimately read .env files
+      - base: "node"
+      - base: "python*"
+      - base: "ruby"
+      - base: "direnv"
+      - base: "docker"
+      - base: "docker-compose"
+      # IDEs
+      - team_id: "2ZEFAR8TH3"  # JetBrains
+      - app_id: "com.microsoft.VSCode"
+      - app_id: "com.sublimetext.*"
+
+  # Cryptocurrency Wallets - EXTREMELY HIGH VALUE TARGETS
+  - id: bitcoin_wallets
+    patterns:
+      - "~/Library/Application Support/Bitcoin/wallet.dat"
+      - "~/Library/Application Support/Bitcoin/wallets/*.dat"
+    allow:
+      - base: "Bitcoin-Qt"
+        euid: 501-599
+      - base: "bitcoin-qt"
+        euid: 501-599
+      - team_id: "Z4JV4P65TM"  # Bitcoin Core
+        euid: 501-599
+
+  - id: electrum_wallet
+    patterns:
+      - "~/.electrum/wallets/*"
+    allow:
+      - base: "Electrum"
+        euid: 501-599
+      - team_id: "L6EQ83Q3B7"  # Electrum
+        euid: 501-599
+
+  - id: ethereum_wallets
+    patterns:
+      - "~/Library/Ethereum/keystore/*"
+      - "~/.ethereum/keystore/*"
+    allow:
+      - base: "Geth"
+      - base: "Mist"
+      - team_id: "XJ4K9XNR66"  # Ethereum
+
+  - id: exodus_wallet
+    patterns:
+      - "~/Library/Application Support/Exodus/exodus.wallet/*"
+    allow:
+      - base: "Exodus"
+      - team_id: "BMJJBXD3S8"  # Exodus
+
+  - id: atomic_wallet
+    patterns:
+      - "~/Library/Application Support/atomic/Local Storage/leveldb/*"
+    allow:
+      - base: "Atomic Wallet"
+      - team_id: "M4MFYQMXN9"  # Atomic
+
+  - id: ledger_live
+    patterns:
+      - "~/Library/Application Support/Ledger Live/*"
+    allow:
+      - base: "Ledger Live"
+      - team_id: "53N4VKA4BU"  # Ledger
+
+  - id: monero_wallet
+    patterns:
+      - "~/Monero/wallets/*"
+      - "~/.bitmonero/*"
+    allow:
+      - base: "monero-wallet-gui"
+      - base: "monerod"
+
+  # Communication Apps
+  - id: discord_tokens
+    patterns:
+      - "~/Library/Application Support/discord/Local Storage/leveldb/*"
+      - "~/Library/Application Support/discord/Local State"
+      - "~/Library/Application Support/discord/Cookies"
+    allow:
+      - base: "Discord"
+        euid: 501-599
+      - team_id: "53Q6R32WPB"  # Discord
+        euid: 501-599
+
+  - id: slack_data
+    patterns:
+      - "~/Library/Application Support/Slack/Local Storage/leveldb/*"
+      - "~/Library/Application Support/Slack/Cookies"
+      - "~/Library/Application Support/Slack/storage/*"
+    allow:
+      - base: "Slack"
+        euid: 501-599
+      - team_id: "BQR82RAZA9"  # Slack
+        euid: 501-599
+
+  - id: signal_data
+    patterns:
+      - "~/Library/Application Support/Signal/sql/*"
+      - "~/Library/Application Support/Signal/config.json"
+      - "~/Library/Application Support/Signal/Local Storage/leveldb/*"
+    allow:
+      - base: "Signal"
+      - team_id: "U68MSDN6DR"  # Signal
+
+  - id: telegram_data
+    patterns:
+      - "~/Library/Application Support/Telegram Desktop/tdata/*"
+    allow:
+      - base: "Telegram"
+      - team_id: "6N38VWS5BX"  # Telegram
+
+  # Gaming Platforms
+  - id: steam_credentials
+    patterns:
+      - "~/Library/Application Support/Steam/config/loginusers.vdf"
+      - "~/Library/Application Support/Steam/config/config.vdf"
+    allow:
+      - base: "Steam"
+      - base: "steamcmd"
+      - team_id: "MXGJJ98X76"  # Valve
+
+  # VPN Configurations
+  - id: openvpn_profiles
+    patterns:
+      - "~/Library/Application Support/OpenVPN Connect/profiles/*"
+      - "~/.config/openvpn/*"
+    allow:
+      - base: "OpenVPN Connect"
+      - team_id: "ACV7L3WCD8"  # OpenVPN
+
+  - id: wireguard_configs
+    patterns:
+      - "/usr/local/etc/wireguard/*.conf"
+      - "~/.config/wireguard/*.conf"
+    allow:
+      - base: "WireGuard"
+      - team_id: "5357M5NW9W"  # WireGuard
+      - base: "wg"
+      - base: "wg-quick"
+
+  # FTP/File Transfer Clients (in addition to FileZilla)
+  - id: cyberduck_bookmarks
+    patterns:
+      - "~/Library/Group Containers/G69SCX94XU.duck/Library/Application Support/duck/Bookmarks/*"
+      - "~/Library/Group Containers/G69SCX94XU.duck/Library/Application Support/duck/Credentials/*"
+    allow:
+      - base: "Cyberduck"
+      - team_id: "G69SCX94XU"  # iterate GmbH (Cyberduck)
+
+  - id: transmit_favorites
+    patterns:
+      - "~/Library/Application Support/Transmit/*"
+      - "~/Library/Preferences/com.panic.Transmit.plist"
+    allow:
+      - base: "Transmit*"
+      - team_id: "VE8FC488U5"  # Panic (Transmit)
 
   # Database Clients (keep separate - each should only access own credentials)
   # TablePlus

@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::path::Path;
 use crate::config::Config;
 
@@ -32,6 +32,10 @@ pub struct AllowRule {
     /// User ID (for system processes)
     #[serde(default)]
     pub uid: Option<u32>,
+
+    /// Effective User ID - can be a single value (e.g., 0) or range (e.g., 501-599)
+    #[serde(default, deserialize_with = "deserialize_euid")]
+    pub euid: Option<(u32, u32)>,
 }
 
 impl AllowRule {
@@ -45,8 +49,9 @@ impl AllowRule {
         app_id: Option<&str>,
         args: Option<&[String]>,
         uid: Option<u32>,
+        euid: Option<u32>,
     ) -> bool {
-        self.matches_with_config(process_path, ppid, team_id, app_id, args, uid, None)
+        self.matches_with_config(process_path, ppid, team_id, app_id, args, uid, euid, None)
     }
 
     /// Check if this rule matches the given process context, with config for default paths
@@ -59,6 +64,7 @@ impl AllowRule {
         app_id: Option<&str>,
         args: Option<&[String]>,
         uid: Option<u32>,
+        euid: Option<u32>,
         config: Option<&Config>,
     ) -> bool {
         // All specified conditions must match (AND logic)
@@ -158,6 +164,22 @@ impl AllowRule {
             }
         }
 
+        // Check euid (handles both single values and ranges)
+        if let Some((min_euid, max_euid)) = self.euid {
+            match euid {
+                Some(actual_euid) => {
+                    if actual_euid < min_euid || actual_euid > max_euid {
+                        log::debug!("Rule failed: euid {} not in range {}-{}", actual_euid, min_euid, max_euid);
+                        return false;
+                    }
+                }
+                None => {
+                    log::debug!("Rule failed: expected euid in range {}-{} but none provided", min_euid, max_euid);
+                    return false;
+                }
+            }
+        }
+
         // All specified conditions matched
         true
     }
@@ -205,6 +227,81 @@ fn matches_pattern(pattern: &str, text: &str) -> bool {
         // Exact match
         pattern == text
     }
+}
+
+/// Deserialize EUID from either a single value or a range string
+fn deserialize_euid<'de, D>(deserializer: D) -> Result<Option<(u32, u32)>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    use serde::de::{self, Visitor};
+    use std::fmt;
+
+    struct EuidRangeVisitor;
+
+    impl<'de> Visitor<'de> for EuidRangeVisitor {
+        type Value = Option<(u32, u32)>;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            formatter.write_str("a number or a range like '501-599'")
+        }
+
+        fn visit_none<E>(self) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(None)
+        }
+
+        fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            let val = value as u32;
+            Ok(Some((val, val)))
+        }
+
+        fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            if value < 0 {
+                return Err(E::custom("EUID must be non-negative"));
+            }
+            let val = value as u32;
+            Ok(Some((val, val)))
+        }
+
+        fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            if value.is_empty() {
+                return Ok(None);
+            }
+
+            if let Some(dash_pos) = value.find('-') {
+                // Parse range like "501-599"
+                let start = value[..dash_pos].trim().parse::<u32>()
+                    .map_err(|_| E::custom(format!("Invalid start of range: {}", &value[..dash_pos])))?;
+                let end = value[dash_pos + 1..].trim().parse::<u32>()
+                    .map_err(|_| E::custom(format!("Invalid end of range: {}", &value[dash_pos + 1..])))?;
+
+                if start > end {
+                    return Err(E::custom(format!("Invalid range: {} > {}", start, end)));
+                }
+
+                Ok(Some((start, end)))
+            } else {
+                // Single value
+                let val = value.trim().parse::<u32>()
+                    .map_err(|_| E::custom(format!("Invalid EUID value: {}", value)))?;
+                Ok(Some((val, val)))
+            }
+        }
+    }
+
+    deserializer.deserialize_any(EuidRangeVisitor)
 }
 
 #[cfg(test)]

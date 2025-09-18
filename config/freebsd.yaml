@@ -42,14 +42,23 @@ protected_files:
     allow:
       # SSH tools
       - base: "ssh"
+        euid: 1001-65533  # Regular user accounts on FreeBSD
       - base: "ssh-add"
+        euid: 1001-65533
       - base: "ssh-agent"
+        euid: 1001-65533
       - base: "ssh-keygen"
+        euid: 1001-65533
       - base: "scp"
+        euid: 1001-65533
       - base: "sftp"
+        euid: 1001-65533
       - base: "sshd"
+        euid: 0  # Root for system SSH daemon
       - base: "git"
+        euid: 1001-65533
       - base: "rsync"
+        euid: 1001-65533
       # GitHub CLI
       - base: "gh"
 
@@ -295,8 +304,115 @@ protected_files:
     allow:
       # Only shells themselves should read/write their history
       - base: "bash"
+        euid: 1001-65533
       - base: "zsh"
+        euid: 1001-65533
       - base: "fish"
+        euid: 1001-65533
+      - base: "tcsh"
+        euid: 1001-65533
+      - base: "csh"
+        euid: 1001-65533
+
+  # Environment files with API keys and secrets
+  - id: env_files
+    patterns:
+      - "~/.env"
+      - "~/.envrc"
+      - "~/**/.env"
+      - "~/**/.env.*"
+    allow:
+      # Development tools that legitimately read .env files
+      - base: "node"
+        path_pattern: "/usr/local/bin/node"
+      - base: "python*"
+        path_pattern: "/usr/local/bin/python*"
+      - base: "ruby"
+        path_pattern: "/usr/local/bin/ruby*"
+      - base: "direnv"
+        path_pattern: "/usr/local/bin/direnv"
+
+  # Network authentication credentials
+  - id: netrc_credentials
+    patterns:
+      - "~/.netrc"
+      - "~/.authinfo"
+    allow:
+      - base: "curl"
+        path_pattern: "/usr/local/bin/curl"
+      - base: "wget"
+        path_pattern: "/usr/local/bin/wget"
+      - base: "git"
+        path_pattern: "/usr/local/bin/git"
+      - base: "ftp"
+
+  # Cryptocurrency Wallets - EXTREMELY HIGH VALUE TARGETS
+  - id: bitcoin_wallets
+    patterns:
+      - "~/.bitcoin/wallet.dat"
+      - "~/.bitcoin/wallets/*.dat"
+    allow:
+      - base: "bitcoin-qt"
+        path_pattern: "/usr/local/bin/bitcoin-qt"
+        euid: 1001-65533
+      - base: "bitcoind"
+        path_pattern: "/usr/local/bin/bitcoind"
+        euid: 1001-65533
+      - base: "bitcoin-cli"
+        path_pattern: "/usr/local/bin/bitcoin-cli"
+        euid: 1001-65533
+
+  - id: electrum_wallet
+    patterns:
+      - "~/.electrum/wallets/*"
+    allow:
+      - base: "electrum"
+        path_pattern: "/usr/local/bin/electrum"
+
+  - id: ethereum_wallets
+    patterns:
+      - "~/.ethereum/keystore/*"
+    allow:
+      - base: "geth"
+        path_pattern: "/usr/local/bin/geth"
+
+  - id: monero_wallet
+    patterns:
+      - "~/Monero/wallets/*"
+      - "~/.bitmonero/*"
+    allow:
+      - base: "monero-wallet-gui"
+        path_pattern: "/usr/local/bin/monero-wallet-gui"
+      - base: "monero-wallet-cli"
+        path_pattern: "/usr/local/bin/monero-wallet-cli"
+      - base: "monerod"
+        path_pattern: "/usr/local/bin/monerod"
+
+  # Communication Apps (FreeBSD has fewer GUI apps but some exist)
+  - id: discord_tokens
+    patterns:
+      - "~/.config/discord/Local Storage/leveldb/*"
+      - "~/.config/discord/Local State"
+      - "~/.config/discord/Cookies"
+    allow:
+      - base: "discord"
+        path_pattern: "/usr/local/bin/discord"
+
+  - id: signal_data
+    patterns:
+      - "~/.config/Signal/sql/*"
+      - "~/.config/Signal/config.json"
+      - "~/.config/Signal/Local Storage/leveldb/*"
+    allow:
+      - base: "signal-desktop"
+        path_pattern: "/usr/local/bin/signal-desktop"
+
+  - id: telegram_data
+    patterns:
+      - "~/.local/share/TelegramDesktop/tdata/*"
+    allow:
+      - base: "telegram-desktop"
+        path_pattern: "/usr/local/bin/telegram-desktop"
       - base: "sh"
       - base: "csh"  # C shell (default on FreeBSD)
       - base: "tcsh"  # Enhanced C shell

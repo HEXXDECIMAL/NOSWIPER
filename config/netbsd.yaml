@@ -40,14 +40,23 @@ protected_files:
     allow:
       # SSH tools
       - base: "ssh"
+        euid: 100-65533  # Regular user accounts on NetBSD
       - base: "ssh-add"
+        euid: 100-65533
       - base: "ssh-agent"
+        euid: 100-65533
       - base: "ssh-keygen"
+        euid: 100-65533
       - base: "scp"
+        euid: 100-65533
       - base: "sftp"
+        euid: 100-65533
       - base: "sshd"
+        euid: 0  # Root for system SSH daemon
       - base: "git"
+        euid: 100-65533
       - base: "rsync"
+        euid: 100-65533
       # GitHub CLI
       - base: "gh"
 
@@ -266,15 +275,74 @@ protected_files:
     allow:
       # Only shells themselves should read/write their history
       - base: "bash"
+        euid: 100-65533
       - base: "zsh"
+        euid: 100-65533
       - base: "fish"
+        euid: 100-65533
       - base: "sh"
+        euid: 100-65533
       - base: "ksh"
+        euid: 100-65533
       # Terminal multiplexers might save/restore sessions
       - base: "tmux"
       - base: "screen"  # Korn shell
       - base: "csh"
       - base: "tcsh"
+
+  # Environment files with API keys and secrets
+  - id: env_files
+    patterns:
+      - "~/.env"
+      - "~/.envrc"
+      - "~/**/.env"
+      - "~/**/.env.*"
+    allow:
+      # Development tools that legitimately read .env files
+      - base: "node"
+        path_pattern: "/usr/pkg/bin/node"
+      - base: "python*"
+        path_pattern: "/usr/pkg/bin/python*"
+
+  # Network authentication credentials
+  - id: netrc_credentials
+    patterns:
+      - "~/.netrc"
+      - "~/.authinfo"
+    allow:
+      - base: "curl"
+        path_pattern: "/usr/pkg/bin/curl"
+      - base: "ftp"  # Base NetBSD ftp client
+
+  # Cryptocurrency Wallets - EXTREMELY HIGH VALUE TARGETS
+  - id: bitcoin_wallets
+    patterns:
+      - "~/.bitcoin/wallet.dat"
+      - "~/.bitcoin/wallets/*.dat"
+    allow:
+      - base: "bitcoind"
+        path_pattern: "/usr/pkg/bin/bitcoind"
+        euid: 100-65533
+      - base: "bitcoin-cli"
+        path_pattern: "/usr/pkg/bin/bitcoin-cli"
+        euid: 100-65533
+
+  - id: electrum_wallet
+    patterns:
+      - "~/.electrum/wallets/*"
+    allow:
+      - base: "electrum"
+        path_pattern: "/usr/pkg/bin/electrum"
+
+  - id: monero_wallet
+    patterns:
+      - "~/Monero/wallets/*"
+      - "~/.bitmonero/*"
+    allow:
+      - base: "monero-wallet-cli"
+        path_pattern: "/usr/pkg/bin/monero-wallet-cli"
+      - base: "monerod"
+        path_pattern: "/usr/pkg/bin/monerod"
 
   # NetBSD pkgsrc database
   - pattern: "/var/db/pkg/*"

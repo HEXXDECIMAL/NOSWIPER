@@ -40,14 +40,23 @@ protected_files:
     allow:
       # SSH tools
       - base: "ssh"
+        euid: 1000-65533  # Regular user accounts on OpenBSD
       - base: "ssh-add"
+        euid: 1000-65533
       - base: "ssh-agent"
+        euid: 1000-65533
       - base: "ssh-keygen"
+        euid: 1000-65533
       - base: "scp"
+        euid: 1000-65533
       - base: "sftp"
+        euid: 1000-65533
       - base: "sshd"
+        euid: 0  # Root for system SSH daemon
       - base: "git"
+        euid: 1000-65533
       - base: "rsync"
+        euid: 1000-65533
       # GitHub CLI
       - base: "gh"
 
@@ -277,6 +286,73 @@ protected_files:
   - id: shell_history
     patterns:
       - "~/.bash_history"
+      - "~/.zsh_history"
+      - "~/.history"  # ksh default on OpenBSD
+      - "~/.local/share/fish/fish_history"
+    allow:
+      # Only shells themselves should read/write their history
+      - base: "bash"
+        euid: 1000-65533
+      - base: "zsh"
+        euid: 1000-65533
+      - base: "ksh"  # Default shell on OpenBSD
+        euid: 1000-65533
+      - base: "fish"
+        euid: 1000-65533
+
+  # Environment files with API keys and secrets
+  - id: env_files
+    patterns:
+      - "~/.env"
+      - "~/.envrc"
+      - "~/**/.env"
+      - "~/**/.env.*"
+    allow:
+      # Development tools that legitimately read .env files
+      - base: "node"
+        path_pattern: "/usr/local/bin/node"
+      - base: "python*"
+        path_pattern: "/usr/local/bin/python*"
+
+  # Network authentication credentials
+  - id: netrc_credentials
+    patterns:
+      - "~/.netrc"
+      - "~/.authinfo"
+    allow:
+      - base: "curl"
+        path_pattern: "/usr/local/bin/curl"
+      - base: "ftp"  # Base OpenBSD ftp client
+
+  # Cryptocurrency Wallets - EXTREMELY HIGH VALUE TARGETS
+  - id: bitcoin_wallets
+    patterns:
+      - "~/.bitcoin/wallet.dat"
+      - "~/.bitcoin/wallets/*.dat"
+    allow:
+      - base: "bitcoind"
+        path_pattern: "/usr/local/bin/bitcoind"
+        euid: 1000-65533
+      - base: "bitcoin-cli"
+        path_pattern: "/usr/local/bin/bitcoin-cli"
+        euid: 1000-65533
+
+  - id: electrum_wallet
+    patterns:
+      - "~/.electrum/wallets/*"
+    allow:
+      - base: "electrum"
+        path_pattern: "/usr/local/bin/electrum"
+
+  - id: monero_wallet
+    patterns:
+      - "~/Monero/wallets/*"
+      - "~/.bitmonero/*"
+    allow:
+      - base: "monero-wallet-cli"
+        path_pattern: "/usr/local/bin/monero-wallet-cli"
+      - base: "monerod"
+        path_pattern: "/usr/local/bin/monerod"
       - "~/.zsh_history"
       - "~/.history"  # ksh/sh
       - "~/.local/share/fish/fish_history"

@@ -3,8 +3,10 @@ use crate::config::Config;
 use crate::rules::{Decision, RuleEngine};
 use anyhow::Result;
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::{Duration, Instant};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command as TokioCommand;
 
@@ -14,12 +16,45 @@ use crate::linux_monitor::LinuxMonitor;
 #[cfg(target_os = "freebsd")]
 use crate::freebsd_monitor::FreeBSDMonitor;
 
+/// Cached information about a process
+#[derive(Debug, Clone)]
+struct ProcessInfo {
+    #[allow(dead_code)]
+    pid: u32,
+    ppid: Option<u32>,
+    euid: Option<u32>,
+    path: PathBuf,
+    args: Vec<String>,
+    command_line: String,
+    team_id: Option<String>,
+    signing_id: Option<String>,
+    last_seen: Instant,
+}
+
+impl ProcessInfo {
+    fn new(pid: u32, path: PathBuf) -> Self {
+        Self {
+            pid,
+            ppid: None,
+            euid: None,
+            path,
+            args: Vec::new(),
+            command_line: String::new(),
+            team_id: None,
+            signing_id: None,
+            last_seen: Instant::now(),
+        }
+    }
+}
+
 pub struct Monitor {
     rule_engine: RuleEngine,
     mode: Mode,
     mechanism: Mechanism,
     verbose: bool,
     stop_parent: bool,
+    process_cache: HashMap<u32, ProcessInfo>,
+    cache_ttl: Duration,
 }
 
 // These structs are for potential future use with typed JSON parsing
@@ -42,6 +77,8 @@ impl Monitor {
             mechanism,
             verbose,
             stop_parent,
+            process_cache: HashMap::new(),
+            cache_ttl: Duration::from_secs(300), // 5 minute TTL for process cache
         }
     }
 
@@ -162,22 +199,51 @@ impl Monitor {
                     // Check if this is an open event
                     if json.get("event").and_then(|e| e.get("open")).is_some() {
                         match self.parse_open_event(&json) {
-                            Ok(Some((process_path, file_path, pid, ppid, signing_info))) => {
+                            Ok(Some((process_path, file_path, pid, ppid, euid, signing_info))) => {
+                                // Cache process info
+                                if let Some(p) = pid {
+                                    // Extract team_id and signing_id from JSON
+                                    let team_id = json.get("process")
+                                        .and_then(|p| p.get("team_id"))
+                                        .and_then(|t| t.as_str());
+                                    let signing_id = json.get("process")
+                                        .and_then(|p| p.get("signing_id"))
+                                        .and_then(|s| s.as_str());
+
+                                    self.cache_process_info(
+                                        p,
+                                        &process_path,
+                                        ppid,
+                                        euid,
+                                        &[], // No args for open events
+                                        team_id,
+                                        signing_id,
+                                    );
+                                }
+
                                 // For protected files, handle immediately
                                 if self.rule_engine.is_protected_file(&file_path) {
                                     // Handle synchronously for speed
-                                    self.handle_file_access_with_signing(&process_path, &file_path, pid, ppid, signing_info)
+                                    self.handle_file_access_with_signing(&process_path, &file_path, pid, ppid, euid, signing_info)
                                         .await?;
                                 } else {
                                     // Log non-critical events asynchronously
                                     let process_display = process_path.display().to_string();
-                                    let pid_str = pid.map_or(String::from("?"), |p| p.to_string());
+                                    let pid_str = match (euid, pid) {
+                                        (Some(e), Some(p)) => format!("{}@{}", e, p),
+                                        (None, Some(p)) => p.to_string(),
+                                        _ => String::from("?")
+                                    };
+                                    let ppid_str = match ppid {
+                                        Some(p) => p.to_string(),
+                                        None => String::from("?")
+                                    };
                                     let file_display = file_path.display().to_string();
                                     let verbose = self.verbose;
 
                                     tokio::spawn(async move {
                                         if verbose {
-                                            log::info!("{}[{}]: open {}: OK", process_display, pid_str, file_display);
+                                            log::info!("{}[{}->{}]: open {}: OK", process_display, pid_str, ppid_str, file_display);
                                         }
                                     });
                                 }
@@ -193,10 +259,31 @@ impl Monitor {
                     // Check if this is an exec event
                     else if json.get("event").and_then(|e| e.get("exec")).is_some() {
                         match self.parse_exec_event(&json) {
-                            Ok(Some((process_path, args, pid, ppid, signing_info))) => {
+                            Ok(Some((process_path, args, pid, ppid, euid, signing_info))) => {
+                                // Cache process info with args
+                                if let Some(p) = pid {
+                                    // Extract team_id and signing_id from JSON
+                                    let team_id = json.get("process")
+                                        .and_then(|p| p.get("team_id"))
+                                        .and_then(|t| t.as_str());
+                                    let signing_id = json.get("process")
+                                        .and_then(|p| p.get("signing_id"))
+                                        .and_then(|s| s.as_str());
+
+                                    self.cache_process_info(
+                                        p,
+                                        &process_path,
+                                        ppid,
+                                        euid,
+                                        &args,
+                                        team_id,
+                                        signing_id,
+                                    );
+                                }
+
                                 // Check if any argument contains a protected path
                                 if let Some(protected_path) = self.check_args_for_protected_paths(&args) {
-                                    self.handle_exec_with_protected_path(&process_path, &args, &protected_path, pid, ppid, signing_info)
+                                    self.handle_exec_with_protected_path(&process_path, &args, &protected_path, pid, ppid, euid, signing_info)
                                         .await?;
                                 }
                             }
@@ -274,7 +361,7 @@ impl Monitor {
         exists
     }
 
-    fn parse_open_event(&self, json: &serde_json::Value) -> Result<Option<(PathBuf, PathBuf, Option<u32>, Option<u32>, Option<String>)>> {
+    fn parse_open_event(&self, json: &serde_json::Value) -> Result<Option<(PathBuf, PathBuf, Option<u32>, Option<u32>, Option<u32>, Option<String>)>> {
 
         // This function assumes it's already been verified as an open event
 
@@ -317,6 +404,13 @@ impl Monitor {
             .and_then(|p| p.as_u64())
             .map(|p| p as u32);
 
+        // Extract EUID from audit_token
+        let euid = json.get("process")
+            .and_then(|p| p.get("audit_token"))
+            .and_then(|t| t.get("euid"))
+            .and_then(|e| e.as_u64())
+            .map(|e| e as u32);
+
         // Extract parent PID (ppid)
         let ppid = json.get("process")
             .and_then(|p| p.get("ppid"))
@@ -345,11 +439,12 @@ impl Monitor {
             PathBuf::from(file_path),
             pid,
             ppid,
+            euid,
             signing_info,
         )))
     }
 
-    fn parse_exec_event(&self, json: &serde_json::Value) -> Result<Option<(PathBuf, Vec<String>, Option<u32>, Option<u32>, Option<String>)>> {
+    fn parse_exec_event(&self, json: &serde_json::Value) -> Result<Option<(PathBuf, Vec<String>, Option<u32>, Option<u32>, Option<u32>, Option<String>)>> {
         // Extract process executable path
         let process_path = json.get("event")
             .and_then(|e| e.get("exec"))
@@ -379,6 +474,13 @@ impl Monitor {
             .and_then(|p| p.as_u64())
             .map(|p| p as u32);
 
+        // Extract EUID from audit_token
+        let euid = json.get("process")
+            .and_then(|p| p.get("audit_token"))
+            .and_then(|t| t.get("euid"))
+            .and_then(|e| e.as_u64())
+            .map(|e| e as u32);
+
         // Extract parent PID (ppid)
         let ppid = json.get("process")
             .and_then(|p| p.get("ppid"))
@@ -406,6 +508,7 @@ impl Monitor {
             args,
             pid,
             ppid,
+            euid,
             signing_info,
         )))
     }
@@ -441,6 +544,7 @@ impl Monitor {
         protected_path: &Path,
         pid: Option<u32>,
         ppid: Option<u32>,
+        euid: Option<u32>,
         signing_info: Option<String>,
     ) -> Result<()> {
         // Resolve symlinks to get real paths
@@ -448,8 +552,15 @@ impl Monitor {
         let real_protected_path = self.normalize_path(protected_path);
 
         // Get code signing info
-        let pid_str = pid.map_or(String::from("?"), |p| p.to_string());
-        let ppid_str = ppid.map_or(String::from("?"), |p| p.to_string());
+        let pid_str = match (euid, pid) {
+            (Some(e), Some(p)) => format!("{}@{}", e, p),
+            (None, Some(p)) => p.to_string(),
+            _ => String::from("?")
+        };
+        let ppid_str = match ppid {
+            Some(p) => p.to_string(),
+            None => String::from("?")
+        };
 
         let signer_info = signing_info
             .as_ref()
@@ -466,6 +577,7 @@ impl Monitor {
             app_id: None,  // TODO: Parse from signing_info
             args: None,    // TODO: Get command-line args
             uid: None,     // TODO: Get user ID
+            euid,
         };
 
         // Check if this process is allowed to access the protected path
@@ -475,8 +587,8 @@ impl Monitor {
 
         match decision {
             Decision::Allow => {
-                // Always log allowed exec with protected paths
-                log::info!(
+                // Build log message with process tree
+                let mut log_msg = format!(
                     "{}[{}/ppid:{}]{}: exec with {}: OK (allowed)",
                     real_process_path.display(),
                     pid_str,
@@ -484,13 +596,29 @@ impl Monitor {
                     signer_info,
                     real_protected_path.display()
                 );
+
+                // Add command line
+                let args_str = args.join(" ");
+                log_msg.push_str(&format!("\n  Args: {}", args_str));
+
+                // Add process tree for better context
+                log_msg.push_str("\n\nProcess Tree (5 levels):\n");
+                let process_name = real_process_path.file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("unknown");
+
+                log_msg.push_str(&self.build_process_tree_from_cache(
+                    pid, ppid, euid, process_name, &args_str, 5
+                ));
+
+                log::info!("{}", log_msg);
             }
             Decision::Deny => {
                 match self.mode {
                     Mode::Monitor => {
                         // Build log message
                         let mut log_msg = format!(
-                            "{}[{}/ppid:{}]{}: exec with {}: DETECTED (monitor mode)",
+                            "{}[{}->{}]{}: exec with {}: DETECTED (monitor mode)",
                             real_process_path.display(),
                             pid_str,
                             ppid_str,
@@ -499,22 +627,17 @@ impl Monitor {
                         );
 
                         // Add command line
-                        log_msg.push_str(&format!("\n  Args: {}", args.join(" ")));
+                        let args_str = args.join(" ");
+                        log_msg.push_str(&format!("\n  Args: {}", args_str));
 
-                        // Get parent command line if available
-                        let parent_cmdline = if let Some(ppid) = ppid {
-                            if ppid > 1 {
-                                self.get_process_cmdline(ppid)
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        };
-
-                        if let Some(parent_cmd) = parent_cmdline {
-                            log_msg.push_str(&format!("\n  ↳ Parent: {}", parent_cmd));
-                        }
+                        // Add process tree using cache
+                        log_msg.push_str("\n\nProcess Tree (5 levels):\n");
+                        let process_name = real_process_path.file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("unknown");
+                        log_msg.push_str(&self.build_process_tree_from_cache(
+                            pid, ppid, euid, process_name, &args_str, 5
+                        ));
 
                         log::warn!("{}", log_msg);
                     }
@@ -525,7 +648,7 @@ impl Monitor {
                             let stopped = self.suspend_process(pid);
 
                             // Always try to suspend parent if requested, even if child already exited
-                            let (parent_stopped, parent_cmdline) = if self.stop_parent {
+                            let (parent_stopped, _parent_cmdline) = if self.stop_parent {
                                 if let Some(ppid) = ppid {
                                     if ppid > 1 {
                                         if self.suspend_process(ppid) {
@@ -570,9 +693,9 @@ impl Monitor {
 
                                 log_msg.push_str(&format!("\n  Args: {}", args.join(" ")));
 
-                                if let Some(parent_cmd) = parent_cmdline {
-                                    log_msg.push_str(&format!("\n  ↳ Parent: {}", parent_cmd));
-                                }
+                                // Add process tree
+                                log_msg.push_str("\n\nProcess Tree (5 levels):\n");
+                                log_msg.push_str(&self.build_process_tree(Some(pid), euid, 5));
 
                                 log::error!("{}", log_msg);
                             } else {
@@ -678,6 +801,7 @@ impl Monitor {
         file_path: &Path,
         pid: Option<u32>,
         ppid: Option<u32>,
+        euid: Option<u32>,
         signing_info: Option<String>,
     ) -> Result<()> {
         // Resolve symlinks to get real paths
@@ -725,6 +849,7 @@ impl Monitor {
             app_id: None,  // TODO: Parse from signing_info
             args: None,    // TODO: Get command-line args
             uid: None,     // TODO: Get user ID
+            euid,
         };
 
         // Check if access is allowed using new context-aware method
@@ -735,8 +860,8 @@ impl Monitor {
 
         match decision {
             Decision::Allow => {
-                // Always log allowed access to protected files (they're on our monitoring list)
-                log::info!(
+                // Build log message with process tree
+                let mut log_msg = format!(
                     "{}[{}/ppid:{}]{}: open {}: OK (allowed)",
                     real_process_path.display(),
                     pid_str,
@@ -744,6 +869,26 @@ impl Monitor {
                     signer_info,
                     real_file_path.display()
                 );
+
+                // Add process tree for better context
+                log_msg.push_str("\n\nProcess Tree (5 levels):\n");
+                let process_name = real_process_path.file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("unknown");
+
+                // Try to get command line for current process if available
+                let cmdline = if let Some(p) = pid {
+                    self.get_process_cmdline(p)
+                } else {
+                    None
+                };
+                let args_str = cmdline.as_deref().unwrap_or("");
+
+                log_msg.push_str(&self.build_process_tree_from_cache(
+                    pid, ppid, euid, process_name, args_str, 5
+                ));
+
+                log::info!("{}", log_msg);
             }
             Decision::Deny => {
                 match self.mode {
@@ -755,20 +900,11 @@ impl Monitor {
                             None
                         };
 
-                        // Get parent command line if available
-                        let parent_cmdline = if let Some(ppid) = ppid {
-                            if ppid > 1 {  // Don't try for init
-                                self.get_process_cmdline(ppid)
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        };
+                        // Process tree will show parent info
 
                         // Build log message
                         let mut log_msg = format!(
-                            "{}[{}/ppid:{}]{}: open {}: DETECTED (monitor mode)",
+                            "{}[{}->{}]{}: open {}: DETECTED (monitor mode)",
                             real_process_path.display(),
                             pid_str,
                             ppid_str,
@@ -776,13 +912,21 @@ impl Monitor {
                             real_file_path.display()
                         );
 
-                        if let Some(cmdline) = cmdline {
+                        let args_str = if let Some(ref cmdline) = cmdline {
                             log_msg.push_str(&format!("\n  Args: {}", cmdline));
-                        }
+                            cmdline.as_str()
+                        } else {
+                            ""
+                        };
 
-                        if let Some(parent_cmd) = parent_cmdline {
-                            log_msg.push_str(&format!("\n  ↳ Parent: {}", parent_cmd));
-                        }
+                        // Add process tree using cache
+                        log_msg.push_str("\n\nProcess Tree (5 levels):\n");
+                        let process_name = real_process_path.file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("unknown");
+                        log_msg.push_str(&self.build_process_tree_from_cache(
+                            pid, ppid, euid, process_name, args_str, 5
+                        ));
 
                         log::warn!("{}", log_msg);
                     }
@@ -794,7 +938,7 @@ impl Monitor {
                             let stopped = self.suspend_process(pid);
 
                             // Always try to suspend parent if requested, even if child already exited
-                            let (parent_stopped, parent_cmdline) = if self.stop_parent {
+                            let (parent_stopped, _parent_cmdline) = if self.stop_parent {
                                 if let Some(ppid) = ppid {
                                     if ppid > 1 {  // Don't try to stop init (pid 1)
                                         if self.suspend_process(ppid) {
@@ -841,13 +985,21 @@ impl Monitor {
                                     parent_info
                                 );
 
-                                if let Some(cmdline) = cmdline {
+                                let args_str = if let Some(ref cmdline) = cmdline {
                                     log_msg.push_str(&format!("\n  Args: {}", cmdline));
-                                }
+                                    cmdline.as_str()
+                                } else {
+                                    ""
+                                };
 
-                                if let Some(parent_cmd) = parent_cmdline {
-                                    log_msg.push_str(&format!("\n  ↳ Parent: {}", parent_cmd));
-                                }
+                                // Add process tree using cache
+                                log_msg.push_str("\n\nProcess Tree (5 levels):\n");
+                                let process_name = real_process_path.file_name()
+                                    .and_then(|n| n.to_str())
+                                    .unwrap_or("unknown");
+                                log_msg.push_str(&self.build_process_tree_from_cache(
+                                    Some(pid), ppid, euid, process_name, args_str, 5
+                                ));
 
                                 log::error!("{}", log_msg);
                             } else {
@@ -905,9 +1057,10 @@ impl Monitor {
                         #[cfg(not(target_os = "macos"))]
                         {
                             log::error!(
-                                "{}[{}]: open {}: BLOCKED",
+                                "{}[{}->{}]: open {}: BLOCKED",
                                 real_process_path.display(),
                                 pid_str,
+                                ppid_str,
                                 real_file_path.display()
                             );
                         }
@@ -982,6 +1135,414 @@ impl Monitor {
                 path.to_path_buf()
             }
         }
+    }
+
+    /// Build a visual process tree showing up to 5 levels of parent processes
+    /// Also accepts ppid to start from parent if main process has exited
+    #[cfg(target_os = "macos")]
+    fn build_process_tree_with_parent(&self, pid: Option<u32>, ppid: Option<u32>, euid: Option<u32>, process_name: &str, args: &str, max_levels: usize) -> String {
+        use std::process::Command;
+
+        let mut tree = Vec::new();
+        let mut current_pid = pid;
+        let mut level = 0;
+
+        // If the main process is not available but we have ppid, add a placeholder for it
+        if let Some(p) = pid {
+            // Try to get info for the main process first
+            let output = Command::new("ps")
+                .args(&["-p", &p.to_string(), "-o", "pid=,ppid=,uid=,comm=,args="])
+                .output();
+
+            if let Ok(output) = output {
+                if output.stdout.is_empty() {
+                    // Process has exited, add a placeholder with the info we have
+                    let uid_str = if let Some(e) = euid {
+                        format!("{}@{}", e, p)
+                    } else {
+                        format!("?@{}", p)
+                    };
+                    tree.push(format!("→ {} {} [{}] (exited)", process_name, args, uid_str));
+
+                    // Start from parent
+                    current_pid = ppid;
+                    level = 1;
+                }
+            }
+        }
+
+        while let Some(p) = current_pid {
+            if level >= max_levels || p <= 1 {
+                break;
+            }
+
+            // Get process info using ps
+            let output = Command::new("ps")
+                .args(&["-p", &p.to_string(), "-o", "pid=,ppid=,uid=,comm=,args="])
+                .output();
+
+            if let Ok(output) = output {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let line = stdout.trim();
+
+                if !line.is_empty() {
+                    // Parse ps output: pid ppid uid comm args...
+                    let parts: Vec<&str> = line.split_whitespace().collect();
+                    if parts.len() >= 4 {
+                        let pid_val = parts[0];
+                        let ppid_val = parts[1].parse::<u32>().unwrap_or(0);
+                        let uid_val = parts[2];
+
+                        // Find where args start (after comm)
+                        let args_start = line.find(parts[3]).unwrap_or(0);
+                        let args = if args_start > 0 {
+                            &line[args_start..]
+                        } else {
+                            parts[3]
+                        };
+
+                        // Format with proper indentation
+                        let indent = "  ".repeat(level);
+                        let prefix = if level == 0 { "→" } else { "↳" };
+
+                        // Use provided euid for first level, otherwise use uid from ps
+                        let uid_str = if level == 0 && euid.is_some() {
+                            format!("{}@{}", euid.unwrap(), pid_val)
+                        } else {
+                            format!("{}@{}", uid_val, pid_val)
+                        };
+
+                        // Truncate args if too long
+                        let display_args = if args.len() > 100 {
+                            format!("{}...", &args[..97])
+                        } else {
+                            args.to_string()
+                        };
+
+                        tree.push(format!("{}{} {} [{}]", indent, prefix, display_args, uid_str));
+
+                        // Move to parent
+                        current_pid = if ppid_val > 1 { Some(ppid_val) } else { None };
+                    } else {
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+
+            level += 1;
+        }
+
+        if tree.is_empty() {
+            return String::from("  (Process tree unavailable)");
+        }
+
+        tree.join("\n")
+    }
+
+    /// Simple wrapper for compatibility
+    #[cfg(target_os = "macos")]
+    fn build_process_tree(&self, pid: Option<u32>, euid: Option<u32>, max_levels: usize) -> String {
+        // For simple calls without extra info
+        self.build_process_tree_with_parent(pid, None, euid, "unknown", "", max_levels)
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn build_process_tree(&self, pid: Option<u32>, euid: Option<u32>, max_levels: usize) -> String {
+        // Linux implementation using /proc
+        let mut tree = Vec::new();
+        let mut current_pid = pid;
+        let mut level = 0;
+
+        while let Some(p) = current_pid {
+            if level >= max_levels || p <= 1 {
+                break;
+            }
+
+            // Read /proc/PID/stat for ppid
+            let stat_path = format!("/proc/{}/stat", p);
+            let cmdline_path = format!("/proc/{}/cmdline", p);
+            let status_path = format!("/proc/{}/status", p);
+
+            // Get command line
+            let cmdline = std::fs::read_to_string(&cmdline_path)
+                .unwrap_or_default()
+                .replace('\0', " ")
+                .trim()
+                .to_string();
+
+            // Get PPID from stat (4th field after comm)
+            let mut ppid_val = 0u32;
+            if let Ok(stat) = std::fs::read_to_string(&stat_path) {
+                // Format: pid (comm) state ppid ...
+                if let Some(start) = stat.rfind(')') {
+                    let fields: Vec<&str> = stat[start+1..].split_whitespace().collect();
+                    if fields.len() > 2 {
+                        ppid_val = fields[1].parse().unwrap_or(0);
+                    }
+                }
+            }
+
+            // Get UID from status
+            let mut uid_val = 0u32;
+            if let Ok(status) = std::fs::read_to_string(&status_path) {
+                for line in status.lines() {
+                    if line.starts_with("Uid:") {
+                        let parts: Vec<&str> = line.split_whitespace().collect();
+                        if parts.len() > 2 {
+                            // effective UID is the second value
+                            uid_val = parts[2].parse().unwrap_or(0);
+                        }
+                        break;
+                    }
+                }
+            }
+
+            // Format with proper indentation
+            let indent = "  ".repeat(level);
+            let prefix = if level == 0 { "→" } else { "↳" };
+
+            // Use provided euid for first level if available
+            let uid_str = if level == 0 && euid.is_some() {
+                format!("{}@{}", euid.unwrap(), p)
+            } else {
+                format!("{}@{}", uid_val, p)
+            };
+
+            let display_cmd = if cmdline.is_empty() {
+                format!("(unknown) [{}]", uid_str)
+            } else {
+                format!("{} [{}]", cmdline, uid_str)
+            };
+
+            tree.push(format!("{}{} {}", indent, prefix, display_cmd));
+
+            // Move to parent
+            current_pid = if ppid_val > 1 { Some(ppid_val) } else { None };
+            level += 1;
+        }
+
+        if tree.is_empty() {
+            return String::from("  (Process tree unavailable)");
+        }
+
+        tree.join("\n")
+    }
+
+    /// Update the process cache with new information
+    fn cache_process_info(&mut self,
+        pid: u32,
+        path: &Path,
+        ppid: Option<u32>,
+        euid: Option<u32>,
+        args: &[String],
+        team_id: Option<&str>,
+        signing_id: Option<&str>,
+    ) {
+        // Clean up old entries periodically
+        if self.process_cache.len() > 1000 {
+            self.cleanup_process_cache();
+        }
+
+        let entry = self.process_cache.entry(pid).or_insert_with(|| {
+            ProcessInfo::new(pid, path.to_path_buf())
+        });
+
+        // Update with latest information
+        entry.path = path.to_path_buf();
+        entry.last_seen = Instant::now();
+
+        if let Some(ppid) = ppid {
+            entry.ppid = Some(ppid);
+        }
+
+        if let Some(euid) = euid {
+            entry.euid = Some(euid);
+        }
+
+        if !args.is_empty() {
+            entry.args = args.to_vec();
+            entry.command_line = args.join(" ");
+        }
+
+        if let Some(tid) = team_id {
+            entry.team_id = Some(tid.to_string());
+        }
+
+        if let Some(sid) = signing_id {
+            entry.signing_id = Some(sid.to_string());
+        }
+
+        log::trace!("Cached process info for PID {}: {} (ppid: {:?}, euid: {:?})",
+            pid, path.display(), ppid, euid);
+    }
+
+    /// Clean up old entries from the process cache
+    fn cleanup_process_cache(&mut self) {
+        let now = Instant::now();
+        let before_size = self.process_cache.len();
+
+        self.process_cache.retain(|_pid, info| {
+            now.duration_since(info.last_seen) < self.cache_ttl
+        });
+
+        let removed = before_size - self.process_cache.len();
+        if removed > 0 {
+            log::debug!("Cleaned up {} old process cache entries", removed);
+        }
+    }
+
+    /// Build a process tree using cached information first, falling back to ps if needed
+    fn build_process_tree_from_cache(&self, pid: Option<u32>, ppid: Option<u32>,
+        euid: Option<u32>, process_name: &str, args: &str, max_levels: usize) -> String {
+
+        let mut tree = Vec::new();
+        let mut current_pid = pid;
+        let mut level = 0;
+
+        // Start with the current process (might be exited)
+        if let Some(p) = pid {
+            let display_args = if !args.is_empty() {
+                args.to_string()
+            } else if !process_name.is_empty() && process_name != "unknown" {
+                process_name.to_string()
+            } else {
+                "(exited)".to_string()
+            };
+
+            let uid_str = if let Some(e) = euid {
+                format!("{}@{}", e, p)
+            } else {
+                p.to_string()
+            };
+
+            tree.push(format!("→ {} [{}]", display_args, uid_str));
+
+            // Move to parent for next iteration
+            current_pid = ppid;
+            level = 1;
+        }
+
+        // Walk up the tree using cache first
+        while let Some(p) = current_pid {
+            if level >= max_levels {
+                break;
+            }
+
+            // Skip PID 0 but allow PID 1 (init/launchd)
+            if p == 0 {
+                break;
+            }
+
+            // Special handling for PID 1 (init/launchd)
+            if p == 1 {
+                let indent = "  ".repeat(level);
+                let prefix = "↳";
+
+                // Try cache first for PID 1
+                if let Some(cached_info) = self.process_cache.get(&p) {
+                    let display = if !cached_info.command_line.is_empty() {
+                        cached_info.command_line.clone()
+                    } else {
+                        cached_info.path.display().to_string()
+                    };
+                    let uid_str = if let Some(e) = cached_info.euid {
+                        format!("{}@{}", e, p)
+                    } else {
+                        format!("0@{}", p) // PID 1 always runs as root
+                    };
+                    tree.push(format!("{}{} {} [{}]", indent, prefix, display, uid_str));
+                } else {
+                    // PID 1 is always launchd on macOS, init on Linux
+                    #[cfg(target_os = "macos")]
+                    tree.push(format!("{}{} /sbin/launchd [0@1]", indent, prefix));
+                    #[cfg(not(target_os = "macos"))]
+                    tree.push(format!("{}{} /sbin/init [0@1]", indent, prefix));
+                }
+                break; // Stop after PID 1
+            }
+
+            // Check cache first
+            if let Some(cached_info) = self.process_cache.get(&p) {
+                let indent = "  ".repeat(level);
+                let prefix = "↳";
+
+                let display = if !cached_info.command_line.is_empty() {
+                    cached_info.command_line.clone()
+                } else {
+                    cached_info.path.display().to_string()
+                };
+
+                let uid_str = if let Some(e) = cached_info.euid {
+                    format!("{}@{}", e, p)
+                } else {
+                    p.to_string()
+                };
+
+                tree.push(format!("{}{} {} [{}]", indent, prefix, display, uid_str));
+
+                current_pid = cached_info.ppid;
+            } else {
+                // Fall back to ps for uncached processes
+                #[cfg(target_os = "macos")]
+                {
+                    let output = Command::new("ps")
+                        .args(&["-p", &p.to_string(), "-o", "ppid=,uid=,command="])
+                        .output();
+
+                    if let Ok(output) = output {
+                        if let Ok(line) = String::from_utf8(output.stdout) {
+                            let line = line.trim();
+                            if !line.is_empty() {
+                                let parts: Vec<&str> = line.splitn(3, ' ')
+                                    .map(|s| s.trim())
+                                    .filter(|s| !s.is_empty())
+                                    .collect();
+
+                                if parts.len() >= 2 {
+                                    let ppid_val = parts[0].parse::<u32>().unwrap_or(0);
+                                    let uid_val = parts[1].parse::<u32>().unwrap_or(0);
+                                    let cmdline = parts.get(2).unwrap_or(&"").to_string();
+
+                                    let indent = "  ".repeat(level);
+                                    let prefix = "↳";
+                                    let uid_str = format!("{}@{}", uid_val, p);
+
+                                    tree.push(format!("{}{} {} [{}]", indent, prefix, cmdline, uid_str));
+
+                                    // Continue to parent, including PID 1 (but not 0)
+                                    current_pid = if ppid_val > 0 { Some(ppid_val) } else { None };
+                                } else {
+                                    break;
+                                }
+                            } else {
+                                break;
+                            }
+                        } else {
+                            break;
+                        }
+                    } else {
+                        break;
+                    }
+                }
+                #[cfg(not(target_os = "macos"))]
+                {
+                    // Linux: use /proc filesystem
+                    break; // TODO: Implement Linux fallback
+                }
+            }
+
+            level += 1;
+        }
+
+        if tree.is_empty() {
+            return String::from("  (Process tree unavailable)");
+        }
+
+        tree.join("\n")
     }
 
     #[cfg(target_os = "macos")]
@@ -1176,6 +1737,12 @@ impl Monitor {
                     self.show_process_info(process_path);
                     if let Some(pid) = pid {
                         self.show_process_status(pid);
+                        // Show process tree
+                        println!("\n  Process Tree (5 levels):");
+                        let tree = self.build_process_tree(Some(pid), None, 5);
+                        for line in tree.lines() {
+                            println!("    {}", line);
+                        }
                     }
                     // Continue the loop to re-prompt
                     continue;

@@ -24,6 +24,9 @@ pub struct ProcessContext {
 
     /// User ID
     pub uid: Option<u32>,
+
+    /// Effective User ID
+    pub euid: Option<u32>,
 }
 
 impl ProcessContext {
@@ -38,6 +41,7 @@ impl ProcessContext {
             app_id: None,
             args: None,
             uid: None,
+            euid: None,
         }
     }
 
@@ -74,6 +78,12 @@ impl ProcessContext {
     /// Set UID
     #[allow(dead_code)] pub fn with_uid(mut self, uid: u32) -> Self {
         self.uid = Some(uid);
+        self
+    }
+
+    /// Set EUID
+    #[allow(dead_code)] pub fn with_euid(mut self, euid: u32) -> Self {
+        self.euid = Some(euid);
         self
     }
 }

@@ -42,14 +42,23 @@ protected_files:
     allow:
       # SSH tools
       - base: "ssh"
+        euid: 1000-65533  # Regular user accounts on Linux
       - base: "ssh-add"
+        euid: 1000-65533
       - base: "ssh-agent"
+        euid: 1000-65533
       - base: "ssh-keygen"
+        euid: 1000-65533
       - base: "scp"
+        euid: 1000-65533
       - base: "sftp"
+        euid: 1000-65533
       - base: "sshd"
+        euid: 0  # Root for system SSH daemon
       - base: "git"
+        euid: 1000-65533
       - base: "rsync"
+        euid: 1000-65533
       # GitHub CLI from Linuxbrew (versioned paths)
       - base: "gh"
         path_pattern: "/home/linuxbrew/.linuxbrew/Cellar/gh/*/bin/*"
@@ -427,6 +436,254 @@ protected_files:
       - base: "glance"
       - base: "cinder"
       - base: "swift"
+
+  # Shell History Files (often contain passwords in commands)
+  - id: shell_history
+    patterns:
+      - "~/.bash_history"
+      - "~/.zsh_history"
+      - "~/.fish_history"
+      - "~/.history"
+      - "~/.sh_history"
+    allow:
+      # Only shells should access history files
+      - base: "bash"
+        euid: 1000-65533
+      - base: "zsh"
+        euid: 1000-65533
+      - base: "fish"
+        euid: 1000-65533
+      - base: "sh"
+        euid: 1000-65533
+      - base: "dash"
+        euid: 1000-65533
+      - base: "tcsh"
+        euid: 1000-65533
+      - base: "csh"
+        euid: 1000-65533
+      # Terminal emulators that might read history
+      - base: "gnome-terminal"
+        euid: 1000-65533
+      - base: "konsole"
+        euid: 1000-65533
+      - base: "xfce4-terminal"
+        euid: 1000-65533
+      - base: "tilix"
+        euid: 1000-65533
+      - base: "alacritty"
+        euid: 1000-65533
+      - base: "kitty"
+        euid: 1000-65533
+      - base: "wezterm"
+        euid: 1000-65533
+      - base: "terminator"
+        euid: 1000-65533
+
+  # Environment files with API keys and secrets
+  - id: env_files
+    patterns:
+      - "~/.env"
+      - "~/.envrc"
+      - "~/**/.env"
+      - "~/**/.env.*"
+    allow:
+      # Development tools that legitimately read .env files
+      - base: "node"
+      - base: "python*"
+      - base: "ruby"
+      - base: "direnv"
+      - base: "docker"
+      - base: "docker-compose"
+      - base: "podman"
+      # IDEs (Linux versions)
+      - base: "idea"
+      - base: "pycharm"
+      - base: "code"
+      - base: "subl"
+
+  # Network authentication credentials (Linux-specific)
+  - id: netrc_credentials
+    patterns:
+      - "~/.netrc"
+      - "~/.authinfo"
+    allow:
+      - base: "curl"
+      - base: "wget"
+      - base: "git"
+      - base: "ftp"
+      - base: "lftp"
+
+  # Cryptocurrency Wallets - EXTREMELY HIGH VALUE TARGETS
+  - id: bitcoin_wallets
+    patterns:
+      - "~/.bitcoin/wallet.dat"
+      - "~/.bitcoin/wallets/*.dat"
+    allow:
+      - base: "bitcoin-qt"
+        euid: 1000-65533
+      - base: "bitcoind"
+        euid: 1000-65533
+      - base: "bitcoin-cli"
+        euid: 1000-65533
+
+  - id: electrum_wallet
+    patterns:
+      - "~/.electrum/wallets/*"
+    allow:
+      - base: "electrum"
+
+  - id: ethereum_wallets
+    patterns:
+      - "~/.ethereum/keystore/*"
+    allow:
+      - base: "geth"
+      - base: "parity"
+
+  - id: exodus_wallet
+    patterns:
+      - "~/.config/Exodus/exodus.wallet/*"
+    allow:
+      - base: "exodus"
+
+  - id: atomic_wallet
+    patterns:
+      - "~/.config/atomic/Local Storage/leveldb/*"
+    allow:
+      - base: "atomic"
+
+  - id: monero_wallet
+    patterns:
+      - "~/Monero/wallets/*"
+      - "~/.bitmonero/*"
+    allow:
+      - base: "monero-wallet-gui"
+      - base: "monero-wallet-cli"
+      - base: "monerod"
+
+  # Communication Apps (Linux paths)
+  - id: discord_tokens
+    patterns:
+      - "~/.config/discord/Local Storage/leveldb/*"
+      - "~/.config/discord/Local State"
+      - "~/.config/discord/Cookies"
+    allow:
+      - base: "discord"
+        euid: 1000-65533
+      - base: "Discord"
+        euid: 1000-65533
+
+  - id: slack_data
+    patterns:
+      - "~/.config/Slack/Local Storage/leveldb/*"
+      - "~/.config/Slack/Cookies"
+      - "~/.config/Slack/storage/*"
+    allow:
+      - base: "slack"
+
+  - id: signal_data
+    patterns:
+      - "~/.config/Signal/sql/*"
+      - "~/.config/Signal/config.json"
+      - "~/.config/Signal/Local Storage/leveldb/*"
+    allow:
+      - base: "signal-desktop"
+
+  - id: telegram_data
+    patterns:
+      - "~/.local/share/TelegramDesktop/tdata/*"
+    allow:
+      - base: "telegram-desktop"
+      - base: "Telegram"
+
+  - id: element_data
+    patterns:
+      - "~/.config/Element/Local Storage/leveldb/*"
+      - "~/.config/Element/storage/*"
+    allow:
+      - base: "element-desktop"
+
+  # Gaming Platforms
+  - id: steam_credentials
+    patterns:
+      - "~/.steam/steam/config/loginusers.vdf"
+      - "~/.steam/steam/config/config.vdf"
+      - "~/.local/share/Steam/config/loginusers.vdf"
+      - "~/.local/share/Steam/config/config.vdf"
+    allow:
+      - base: "steam"
+        euid: 1000-65533
+      - base: "steamcmd"
+        euid: 1000-65533
+
+  # VPN Configurations
+  - id: openvpn_profiles
+    patterns:
+      - "~/.config/openvpn/*"
+      - "/etc/openvpn/*.conf"
+      - "/etc/openvpn/client/*.conf"
+    allow:
+      - base: "openvpn"
+
+  - id: wireguard_configs
+    patterns:
+      - "/etc/wireguard/*.conf"
+      - "~/.config/wireguard/*.conf"
+    allow:
+      - base: "wg"
+      - base: "wg-quick"
+
+  - id: network_manager_connections
+    patterns:
+      - "/etc/NetworkManager/system-connections/*"
+    allow:
+      - base: "NetworkManager"
+      - base: "nmcli"
+
+  # Linux Keyring Systems
+  - id: gnome_keyring
+    patterns:
+      - "~/.local/share/keyrings/*"
+      - "~/.gnome2/keyrings/*"
+    allow:
+      - base: "gnome-keyring-daemon"
+      - base: "seahorse"
+      - base: "evolution"
+      - base: "firefox"
+      - base: "chromium-browser"
+      - base: "google-chrome"
+
+  - id: kwallet_data
+    patterns:
+      - "~/.local/share/kwalletd/*"
+      - "~/.kde*/share/apps/kwallet/*"
+    allow:
+      - base: "kwalletd5"
+      - base: "kwalletmanager"
+      - base: "konsole"
+      - base: "dolphin"
+      - base: "firefox"
+
+  # Database Clients (Linux)
+  - id: dbeaver_configs
+    patterns:
+      - "~/.dbeaver*/workspace*/.metadata/.plugins/org.jkiss.dbeaver.core/credentials-config.json"
+      - "~/.local/share/DBeaverData/workspace*/.metadata/.plugins/org.jkiss.dbeaver.core/credentials-config.json"
+    allow:
+      - base: "dbeaver"
+
+  - id: mysql_workbench_connections
+    patterns:
+      - "~/.mysql/workbench/connections.xml"
+      - "~/.mysql/workbench/server_instances.xml"
+    allow:
+      - base: "mysql-workbench"
+
+  - id: pgadmin_configs
+    patterns:
+      - "~/.pgadmin/*"
+      - "~/.local/share/pgadmin/*"
+    allow:
+      - base: "pgadmin4"
       - base: "heat"
       - base: "keystone"
 

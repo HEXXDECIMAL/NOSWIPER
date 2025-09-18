@@ -185,6 +185,7 @@ impl RuleEngine {
                 context.app_id.as_deref(),
                 context.args.as_deref(),
                 context.uid,
+                context.euid,
                 Some(&self.config),
             ) {
                 log::info!("Access allowed by global exclusion: {}", context.path.display());
@@ -208,6 +209,7 @@ impl RuleEngine {
                                 context.app_id.as_deref(),
                                 context.args.as_deref(),
                                 context.uid,
+                                context.euid,
                                 Some(&self.config),
                             ) {
                                 log::debug!("Process allowed by allow rule");
