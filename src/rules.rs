@@ -11,6 +11,7 @@ pub enum Decision {
     Deny,
 }
 
+#[derive(Clone)]
 pub struct RuleEngine {
     // Pattern -> allowed programs
     protection_rules: HashMap<String, Vec<String>>,

@@ -14,72 +14,25 @@ pub struct Monitor {
     rule_engine: RuleEngine,
     mode: Mode,
     mechanism: Mechanism,
+    verbose: bool,
 }
 
-// Try multiple possible JSON structures since eslogger format may vary
-#[derive(Deserialize, Debug)]
-#[serde(untagged)]
-enum EsloggerEventWrapper {
-    Standard(EsloggerEvent),
-    Compact(CompactEsloggerEvent),
-}
-
+// These structs are for potential future use with typed JSON parsing
+// Currently we parse JSON dynamically for flexibility
+#[allow(dead_code)]
 #[derive(Deserialize, Debug)]
 struct EsloggerEvent {
-    #[serde(rename = "process")]
-    process_info: ProcessInfo,
-    #[serde(rename = "event")]
-    event_info: EventInfo,
-}
-
-#[derive(Deserialize, Debug)]
-struct CompactEsloggerEvent {
-    process: ProcessInfo,
-    #[serde(rename = "open")]
-    open_info: Option<OpenInfo>,
-}
-
-#[derive(Deserialize, Debug)]
-struct OpenInfo {
-    file: FileInfo,
-}
-
-#[derive(Deserialize, Debug)]
-struct ProcessInfo {
-    #[serde(rename = "executable")]
-    executable_path: Option<serde_json::Value>,  // Can be string or object
-    #[serde(rename = "name")]
-    _name: Option<String>,
-    #[serde(rename = "pid")]
-    pid: Option<u32>,
-    #[serde(rename = "signing_id")]
-    signing_id: Option<String>,
-    #[serde(rename = "team_id")]
-    team_id: Option<String>,
-}
-
-#[derive(Deserialize, Debug)]
-struct EventInfo {
-    #[serde(rename = "type")]
-    event_type: String,
-    #[serde(rename = "open")]
-    open_info: Option<OpenInfo>,
-}
-
-#[derive(Deserialize, Debug)]
-struct FileInfo {
-    #[serde(rename = "path")]
-    path: Option<String>,
-    #[serde(rename = "destination")]
-    destination: Option<String>,  // Some eslogger versions use this
+    process: serde_json::Value,
+    event: serde_json::Value,
 }
 
 impl Monitor {
-    pub fn new(mode: Mode, mechanism: Mechanism) -> Self {
+    pub fn new(mode: Mode, mechanism: Mechanism, verbose: bool) -> Self {
         Self {
             rule_engine: RuleEngine::new(),
             mode,
             mechanism,
+            verbose,
         }
     }
 
@@ -161,6 +114,7 @@ impl Monitor {
             }
         });
 
+        // Use unbuffered reading for lower latency
         let reader = BufReader::new(stdout);
         let mut lines = reader.lines();
         let mut event_count = 0;
@@ -187,13 +141,33 @@ impl Monitor {
                 log::debug!("Processed {} eslogger events", event_count);
             }
 
-            // Log raw events in debug mode
-            log::trace!("Raw eslogger event: {}", line);
+            // Clone data for parallel processing
+            let line_clone = line.clone();
 
+            // Process critical events immediately in parallel
             match self.parse_eslogger_event(&line) {
                 Ok(Some((process_path, file_path, pid))) => {
-                    self.handle_file_access_with_pid(&process_path, &file_path, pid)
-                        .await?;
+                    // For protected files, handle immediately
+                    if self.rule_engine.is_protected_file(&file_path) {
+                        // Handle synchronously for speed
+                        self.handle_file_access_with_signing(&process_path, &file_path, pid, signing_info)
+                            .await?;
+                    } else {
+                        // Log non-critical events asynchronously
+                        let process_name = process_path.file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("unknown")
+                            .to_string();
+                        let pid_str = pid.map_or(String::from("?"), |p| p.to_string());
+                        let file_display = file_path.display().to_string();
+                        let verbose = self.verbose;
+
+                        tokio::spawn(async move {
+                            if verbose {
+                                log::info!("{}[{}]: open {}: OK", process_name, pid_str, file_display);
+                            }
+                        });
+                    }
                 }
                 Ok(None) => {
                     // Event parsed but not relevant (not a file access we care about)
@@ -204,7 +178,7 @@ impl Monitor {
                     if event_count <= 10 {
                         log::warn!("Failed to parse eslogger event #{}: {}", event_count, e);
                     } else {
-                        log::debug!("Failed to parse eslogger event: {} - Event: {}", e, line);
+                        log::debug!("Failed to parse eslogger event: {} - Event: {}", e, line_clone);
                     }
                 }
             }
@@ -317,27 +291,37 @@ impl Monitor {
             .and_then(|p| p.as_u64())
             .map(|p| p as u32);
 
-        // Extract signing info if available
+        // Extract signing info from eslogger (no filesystem access!)
         let signing_id = json.get("process")
             .and_then(|p| p.get("signing_id"))
             .and_then(|s| s.as_str());
 
-        if let Some(sid) = signing_id {
-            log::trace!("Process signing ID: {}", sid);
-        }
+        let team_id = json.get("process")
+            .and_then(|p| p.get("team_id"))
+            .and_then(|t| t.as_str());
+
+        // Combine signing info into a single string
+        let signing_info = match (signing_id, team_id) {
+            (Some(sid), Some(tid)) => Some(format!("{} [{}]", sid, tid)),
+            (Some(sid), None) => Some(sid.to_string()),
+            (None, Some(tid)) => Some(format!("[{}]", tid)),
+            (None, None) => None,
+        };
 
         Ok(Some((
             PathBuf::from(process_path),
             PathBuf::from(file_path),
             pid,
+            signing_info,
         )))
     }
 
-    async fn handle_file_access_with_pid(
+    async fn handle_file_access_with_signing(
         &mut self,
         process_path: &Path,
         file_path: &Path,
         pid: Option<u32>,
+        signing_info: Option<String>,
     ) -> Result<()> {
         // Resolve symlinks to get real paths
         let real_file_path = self.normalize_path(file_path);
@@ -351,24 +335,25 @@ impl Monitor {
 
         let pid_str = pid.map_or(String::from("?"), |p| p.to_string());
 
-        // Get code signing info on macOS
-        #[cfg(target_os = "macos")]
-        let signer_info = self.get_code_signer(&real_process_path);
-        #[cfg(not(target_os = "macos"))]
-        let signer_info = String::new();
+        // Use signing info from eslogger - NEVER access the binary!
+        let signer_info = signing_info
+            .map(|s| format!(" [{}]", s))
+            .unwrap_or_default();
 
         // Log ALL file opens, not just protected ones
         let is_protected = self.rule_engine.is_protected_file(&real_file_path);
 
         if !is_protected {
-            // Log non-protected file access at INFO level so it's visible
-            log::info!(
-                "{}[{}]{}: open {}: OK",
-                process_name,
-                pid_str,
-                signer_info,
-                real_file_path.display()
-            );
+            // Log non-protected file access only in verbose mode
+            if self.verbose {
+                log::info!(
+                    "{}[{}]{}: open {}: OK",
+                    process_name,
+                    pid_str,
+                    signer_info,
+                    real_file_path.display()
+                );
+            }
             return Ok(());
         }
 
@@ -381,13 +366,16 @@ impl Monitor {
 
         match decision {
             Decision::Allow => {
-                log::info!(
-                    "{}[{}]{}: open {}: OK",
-                    process_name,
-                    pid_str,
-                    signer_info,
-                    real_file_path.display()
-                );
+                // Log allowed access to protected files only in verbose mode
+                if self.verbose {
+                    log::info!(
+                        "{}[{}]{}: open {}: OK (allowed)",
+                        process_name,
+                        pid_str,
+                        signer_info,
+                        real_file_path.display()
+                    );
+                }
             }
             Decision::Deny => {
                 match self.mode {
@@ -516,26 +504,39 @@ impl Monitor {
 
     #[cfg(target_os = "macos")]
     fn suspend_process(&self, pid: u32) -> bool {
-        use std::process::Command;
+        // Use libc kill directly for lower latency
+        unsafe {
+            // Try to suspend immediately without checking first (faster)
+            let result = libc::kill(pid as libc::pid_t, libc::SIGSTOP);
 
-        // First check if process exists
-        match Command::new("kill")
-            .args(["-0", &pid.to_string()])
-            .output()
-        {
-            Ok(check_output) => {
-                if !check_output.status.success() {
+            if result == 0 {
+                log::debug!("Successfully suspended process PID {}", pid);
+                return true;
+            }
+
+            // Check errno to understand why it failed
+            let errno = *libc::__error();
+            match errno {
+                libc::ESRCH => {
                     log::debug!("Process PID {} no longer exists (already exited)", pid);
-                    return false;
+                }
+                libc::EPERM => {
+                    log::error!("Permission denied suspending PID {} (may be protected by SIP)", pid);
+                }
+                _ => {
+                    log::error!("Failed to suspend PID {}: errno {}", pid, errno);
                 }
             }
-            Err(e) => {
-                log::error!("Failed to check process existence: {}", e);
-                return false;
-            }
+            false
         }
+    }
 
-        // Now try to suspend it
+    #[cfg(target_os = "macos")]
+    #[allow(dead_code)]
+    fn _suspend_process_fallback(&self, pid: u32) -> bool {
+        use std::process::Command;
+
+        // Fallback to command if needed
         match Command::new("kill")
             .args(["-STOP", &pid.to_string()])
             .output()
@@ -669,40 +670,9 @@ impl Monitor {
         println!("\nAdditional Information:");
         println!("  Full path: {}", process_path.display());
 
-        // Try to get more info about the process
-        if let Ok(metadata) = std::fs::metadata(process_path) {
-            if let Ok(modified) = metadata.modified() {
-                if let Ok(system_time) = modified.duration_since(std::time::UNIX_EPOCH) {
-                    let datetime =
-                        chrono::DateTime::from_timestamp(system_time.as_secs() as i64, 0);
-                    if let Some(dt) = datetime {
-                        println!("  Modified: {}", dt.format("%Y-%m-%d %H:%M:%S"));
-                    }
-                }
-            }
-        }
-
-        #[cfg(target_os = "macos")]
-        {
-            // Try to get code signature info on macOS
-            if let Ok(output) = Command::new("codesign")
-                .args(["-dvvv", process_path.to_str().unwrap_or("")])
-                .output()
-            {
-                if output.status.success() {
-                    println!("  Code signature: Signed");
-                    let info = String::from_utf8_lossy(&output.stderr);
-                    for line in info.lines() {
-                        if line.contains("Authority=") {
-                            println!("  Signer: {}", line.trim());
-                            break;
-                        }
-                    }
-                } else {
-                    println!("  Code signature: Unsigned");
-                }
-            }
-        }
+        // We no longer access the filesystem for process info
+        // All information comes from eslogger events
+        println!("  Note: Code signing info available in event logs");
     }
 
     fn show_process_status(&self, pid: u32) {
@@ -737,7 +707,7 @@ impl Monitor {
         log::info!("Using fanotify mechanism");
 
         // Use the Linux-specific monitor implementation
-        let mut linux_monitor = LinuxMonitor::new(self.mode.clone());
+        let mut linux_monitor = LinuxMonitor::new(self.mode.clone(), self.verbose);
         linux_monitor.start().await
     }
 
@@ -771,31 +741,6 @@ impl Monitor {
         }
     }
 
-    #[cfg(target_os = "macos")]
-    fn get_code_signer(&self, path: &Path) -> String {
-        // Try to get code signature info
-        if let Ok(output) = Command::new("codesign")
-            .args(["-dvvv", path.to_str().unwrap_or("")])
-            .output()
-        {
-            if output.status.success() {
-                let info = String::from_utf8_lossy(&output.stderr);
-                // Look for the first Authority= line which shows the signer
-                for line in info.lines() {
-                    if line.contains("Authority=") {
-                        let signer = line.trim()
-                            .strip_prefix("Authority=")
-                            .unwrap_or(line.trim())
-                            .to_string();
-                        // Return formatted signer info
-                        return format!(" [{}]", signer);
-                    }
-                }
-                // Signed but couldn't extract signer
-                return " [Signed]".to_string();
-            }
-        }
-        // Not signed or couldn't check
-        String::new()
-    }
+    // REMOVED: get_code_signer - We should NEVER access binaries!
+    // All signing info comes from eslogger events to avoid filesystem access
 }

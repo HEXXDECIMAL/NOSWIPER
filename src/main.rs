@@ -1,3 +1,5 @@
+#![deny(warnings)]
+
 mod cli;
 mod defaults;
 mod monitor;
@@ -46,7 +48,7 @@ async fn main() -> Result<()> {
     info!("Mechanism: {}", args.get_mechanism());
 
     // Create and start monitor
-    let mut monitor = Monitor::new(args.get_mode(), args.get_mechanism());
+    let mut monitor = Monitor::new(args.get_mode(), args.get_mechanism(), args.verbose);
 
     // Handle shutdown gracefully
     let shutdown_result = tokio::select! {

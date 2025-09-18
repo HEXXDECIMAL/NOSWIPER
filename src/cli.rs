@@ -13,6 +13,10 @@ pub struct Args {
     #[arg(long)]
     pub interactive: bool,
 
+    /// Verbose output (show all file opens including OK ones)
+    #[arg(long, short)]
+    pub verbose: bool,
+
     /// Monitoring mechanism to use
     #[arg(long, value_enum)]
     pub mechanism: Option<Mechanism>,
