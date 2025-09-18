@@ -26,17 +26,18 @@ const FAN_CLASS_PRE_CONTENT: u32 = 0x00000008;
 
 const FAN_CLOEXEC: u32 = 0x00000001;
 
-// Fanotify event metadata structure
-#[repr(C)]
+// Fanotify event metadata structure - must match kernel struct exactly!
+// From /usr/include/linux/fanotify.h
+#[repr(C, packed)]
 #[derive(Debug, Clone, Copy)]
 pub struct FanotifyEventMetadata {
-    pub event_len: u32,
-    pub vers: u8,
-    pub reserved: u8,
-    pub metadata_len: u16,
-    pub mask: u64,
-    pub fd: i32,
-    pub pid: i32,
+    pub event_len: u32,      // Total length of this event metadata
+    pub vers: u8,             // Version (FANOTIFY_METADATA_VERSION)
+    pub reserved: u8,         // Reserved, should be 0
+    pub metadata_len: u16,    // Length of this structure (should be 24)
+    pub mask: u64,           // Event mask
+    pub fd: i32,             // File descriptor of the accessed file
+    pub pid: i32,            // PID of the accessing process
 }
 
 // Fanotify response structure
@@ -581,14 +582,31 @@ impl LinuxMonitor {
 
             log::info!("Received fanotify event(s), {} bytes", len);
 
+            // Dump the first few bytes for debugging
+            if len > 0 && len <= 100 {
+                let hex: Vec<String> = buffer[..len as usize].iter()
+                    .map(|b| format!("{:02x}", b))
+                    .collect();
+                log::debug!("Raw event data: {}", hex.join(" "));
+            }
+
             // Process events
             let mut offset = 0;
             while offset < len as usize {
+                if offset + std::mem::size_of::<FanotifyEventMetadata>() > len as usize {
+                    log::warn!("Not enough data for complete event at offset {}", offset);
+                    break;
+                }
+
                 let metadata =
                     unsafe { &*(buffer.as_ptr().add(offset) as *const FanotifyEventMetadata) };
 
+                log::debug!("Reading event at offset {}: vers={}, event_len={}",
+                    offset, metadata.vers, metadata.event_len);
+
                 if metadata.vers != libc::FANOTIFY_METADATA_VERSION as u8 {
-                    log::warn!("Unsupported fanotify metadata version: {}", metadata.vers);
+                    log::warn!("Unsupported fanotify metadata version: {} (expected {})",
+                        metadata.vers, libc::FANOTIFY_METADATA_VERSION);
                     break;
                 }
 
@@ -611,8 +629,17 @@ impl LinuxMonitor {
                 // Handle the event - don't propagate errors, just log them
                 if let Err(e) = self.handle_event(metadata).await {
                     log::error!("Error handling event: {}", e);
-                    // DON'T close metadata.fd here - it might be our fanotify fd!
-                    // The handle_event function should handle closing it if needed
+                    // For permission events, we MUST respond even on error
+                    if metadata.mask & FAN_OPEN_PERM != 0 {
+                        // Try to send ALLOW response and close fd
+                        let _ = self.respond_to_event(metadata.fd, FAN_ALLOW);
+                        // NEVER close the fanotify fd!
+                        if metadata.fd != fd {
+                            unsafe { libc::close(metadata.fd) };
+                        } else {
+                            log::error!("NOT closing fd {} as it's the fanotify fd!", metadata.fd);
+                        }
+                    }
                 }
 
                 offset += metadata.event_len as usize;
