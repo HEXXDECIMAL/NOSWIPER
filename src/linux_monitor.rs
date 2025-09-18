@@ -83,13 +83,22 @@ impl LinuxMonitor {
 
         log::debug!("Expanding patterns for {} users", users.len());
 
+        let protected_files_count = self.rule_engine.config.protected_files.len();
+        log::debug!("Configuration has {} protected file groups", protected_files_count);
+
         // Process each protected file pattern from the YAML configuration
         for protected_file in &self.rule_engine.config.protected_files {
-            for pattern_str in protected_file.patterns() {
+            let patterns = protected_file.patterns();
+            log::debug!("Checking {} patterns from group", patterns.len());
+
+            for pattern_str in patterns {
                 // For each pattern, expand it for all users and find matching files
                 let expanded_paths = self.expand_pattern_for_users(&pattern_str, &users);
                 if !expanded_paths.is_empty() {
                     log::debug!("Pattern '{}' matched {} files", pattern_str, expanded_paths.len());
+                    for path in &expanded_paths {
+                        log::debug!("  - {}", path.display());
+                    }
                 }
                 paths.extend(expanded_paths);
             }
@@ -109,13 +118,24 @@ impl LinuxMonitor {
 
         // If pattern starts with ~, expand for each user
         if pattern.starts_with('~') {
+            log::info!("Expanding ~ pattern '{}' for {} users", pattern, users.len());
             for user_home in users {
                 let expanded_pattern = pattern.replacen('~', &user_home.to_string_lossy(), 1);
-                paths.extend(self.glob_pattern(&expanded_pattern));
+                log::info!("  Expanding '{}' -> '{}'", pattern, expanded_pattern);
+                let found = self.glob_pattern(&expanded_pattern);
+                if !found.is_empty() {
+                    log::info!("    User {}: found {} files",
+                        user_home.display(), found.len());
+                }
+                paths.extend(found);
             }
             // Also expand for root if not already covered
             let root_pattern = pattern.replacen('~', "/root", 1);
-            paths.extend(self.glob_pattern(&root_pattern));
+            let found = self.glob_pattern(&root_pattern);
+            if !found.is_empty() {
+                log::debug!("Root: pattern '{}' found {} files", pattern, found.len());
+            }
+            paths.extend(found);
         } else {
             // Absolute pattern, use as-is
             paths.extend(self.glob_pattern(pattern));
@@ -126,24 +146,29 @@ impl LinuxMonitor {
 
     /// Uses glob to find files matching a pattern
     fn glob_pattern(&self, pattern: &str) -> Vec<PathBuf> {
-        log::trace!("Checking pattern: {}", pattern);
+        log::info!("Glob checking pattern: {}", pattern);
         match glob::glob(pattern) {
-            Ok(entries) => entries
-                .filter_map(|entry| match entry {
-                    Ok(path) => {
-                        if path.is_file() {
-                            log::trace!("  Found file: {}", path.display());
-                            Some(path)
-                        } else {
-                            None
+            Ok(entries) => {
+                let mut results = Vec::new();
+                for entry in entries {
+                    match entry {
+                        Ok(path) => {
+                            log::info!("  Glob found path: {} (is_file: {}, exists: {})",
+                                path.display(), path.is_file(), path.exists());
+                            if path.is_file() {
+                                results.push(path);
+                            }
+                        }
+                        Err(e) => {
+                            log::debug!("  Glob error: {}", e);
                         }
                     }
-                    Err(e) => {
-                        log::debug!("Glob error for pattern '{}': {}", pattern, e);
-                        None
-                    }
-                })
-                .collect(),
+                }
+                if results.is_empty() {
+                    log::info!("  No files matched pattern: {}", pattern);
+                }
+                results
+            }
             Err(e) => {
                 log::warn!("Invalid glob pattern '{}': {}", pattern, e);
                 Vec::new()
@@ -327,10 +352,12 @@ impl LinuxMonitor {
         let mut failed_watches = 0;
 
         for file_path in &protected_files {
+            log::debug!("Checking existence of: {}", file_path.display());
             if !file_path.exists() {
-                log::debug!("File does not exist, skipping: {}", file_path.display());
+                log::warn!("File does not exist, skipping: {}", file_path.display());
                 continue;
             }
+            log::debug!("File exists, will add watch: {}", file_path.display());
 
             if self.add_file_watch(fd, file_path)? {
                 self.watched_paths
