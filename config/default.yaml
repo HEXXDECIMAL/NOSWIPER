@@ -21,7 +21,7 @@ global_exclusions:
     app_id: "com.apple.*"
     ppid: 1
 
-  # Popular cloud sync services (GUI apps must have ppid=1)
+  # Popular cloud sync services
   - base: "Dropbox"
     team_id: "G7HH3F8CAK"  # Dropbox
     ppid: 1
@@ -37,12 +37,12 @@ global_exclusions:
 
 # Files and patterns to protect
 #
-# Note: Patterns with ~ are expanded relative to the daemon's home directory.
-# To protect files in all user home directories, include explicit patterns for:
-# - ~ (daemon's home, typically root when running as service)
-# - /root/* (root user)
-# - /home/* (Linux users)
-# - /Users/* (macOS users)
+# Note: File paths are normalized to ~ based on the file owner's home directory.
+# This means a pattern like "~/.ssh/id_*" will match:
+# - /Users/alice/.ssh/id_rsa (owned by alice)
+# - /home/bob/.ssh/id_ed25519 (owned by bob)
+# - /root/.ssh/id_ecdsa (owned by root)
+# No need to specify multiple patterns for different home directories!
 protected_files:
   # SSH Keys
   - id: ssh_keys
@@ -141,9 +141,7 @@ protected_files:
     allow:
       - base: "az"
       - base: "azure-cli"
-      - base: "powershell"
-        path_pattern: "/usr/local/microsoft/powershell/*/pwsh"
-        team_id: "UBF8T346G9"  # Microsoft
+      - team_id: "UBF8T346G9"  # Microsoft (PowerShell)
 
   # GPG Keys
   - id: gpg_keys
@@ -196,10 +194,8 @@ protected_files:
       - base: "docker"
       - base: "docker-compose"
       - base: "docker-credential-desktop"
-      # Docker Desktop GUI app
-      - base: "Docker"
-        team_id: "9BNSXJN65R"  # Docker Inc
-        ppid: 1
+      # Docker Desktop
+      - team_id: "9BNSXJN65R"  # Docker Inc
 
   # Kubernetes
   - id: kubernetes_config
@@ -210,9 +206,8 @@ protected_files:
       - base: "helm"
       - base: "k9s"
       - base: "minikube"
-      # Lens GUI app
+      # Lens
       - team_id: "R6H3FQGQ9K"  # Mirantis (Lens)
-        ppid: 1
 
   # Browser Password Stores - Firefox
   - id: firefox_passwords
@@ -224,13 +219,8 @@ protected_files:
       - "~/.mozilla/firefox/*/key*.db"  # Linux
       - "~/.mozilla/firefox/*/cookies.sqlite"  # Linux
     allow:
-      # Firefox GUI apps must have ppid=1
-      - base: "firefox"
-        team_id: "43AQ936H96"  # Mozilla
-        ppid: 1
-      - base: "Firefox"
-        team_id: "43AQ936H96"
-        ppid: 1
+      # Firefox
+      - team_id: "43AQ936H96"  # Mozilla
       - base: "com.apple.Safari.BrowserDataImportingService"
         app_id: "com.apple.*"
         path_pattern: "/System/*"
@@ -248,12 +238,7 @@ protected_files:
       - "~/Library/Application Support/Zen/Profiles/*/formhistory.sqlite"
       - "~/Library/Application Support/Zen/Profiles/*/signons.sqlite"
     allow:
-      - base: "zen"
-        team_id: "9V5K9TP787"  # Zen Browser
-        ppid: 1
-      - base: "Zen"
-        team_id: "9V5K9TP787"
-        ppid: 1
+      - team_id: "9V5K9TP787"  # Zen Browser
 
   - pattern: "~/Library/Application Support/Zen/Profiles/*/cert*.db"
     allow:
@@ -301,15 +286,8 @@ protected_files:
       - "~/.config/google-chrome-unstable/*/Web Data"
       - "~/.config/google-chrome-unstable/*/History"
     allow:
-      - base: "Google Chrome"
-        team_id: "EQHXZ8M8AV"  # Google
-        ppid: 1
-      - base: "Google Chrome Beta"
-        team_id: "EQHXZ8M8AV"
-        ppid: 1
-      - base: "Google Chrome Canary"
-        team_id: "EQHXZ8M8AV"
-        ppid: 1
+      # Google Chrome (all variants)
+      - team_id: "EQHXZ8M8AV"  # Google
       # Linux variants
       - base: "google-chrome"
       - base: "google-chrome-stable"
@@ -356,19 +334,12 @@ protected_files:
       - "~/Library/Group Containers/UBF8T346G9.Office/Outlook/Outlook 15 Profiles/Main Profile/Accounts/*"
       - "~/Library/Group Containers/UBF8T346G9.Office/Outlook/Outlook 15 Profiles/Main Profile/*.olk15Message"
     allow:
-      - base: "Microsoft Outlook"
-        team_id: "UBF8T346G9"  # Microsoft
-        ppid: 1
+      - team_id: "UBF8T346G9"  # Microsoft (Outlook)
 
   # Spark Mail
   - pattern: "~/Library/Containers/com.readdle.smartemail-Mac/Data/Library/Application Support/Spark/Accounts.db"
     allow:
-      - base: "Spark"
-        team_id: "6Z8N55R3J2"  # Readdle
-        ppid: 1
-      - base: "Spark – Email App by Readdle"
-        team_id: "6Z8N55R3J2"
-        ppid: 1
+      - team_id: "6Z8N55R3J2"  # Readdle (Spark)
 
   # Thunderbird
   - id: thunderbird_passwords
@@ -380,9 +351,7 @@ protected_files:
       - "~/.thunderbird/*/cookies.sqlite"  # Linux
       - "~/.thunderbird/*/key*.db"  # Linux
     allow:
-      - base: "Thunderbird"
-        team_id: "43AQ936H96"  # Mozilla
-        ppid: 1
+      - team_id: "43AQ936H96"  # Mozilla (Thunderbird)
 
   # Safari Extensions and Data
   - pattern: "~/Library/Safari/LocalStorage/*"
@@ -452,21 +421,14 @@ protected_files:
 
   - pattern: "~/Documents/*.kdbx"
     allow:
-      # KeePassXC GUI app
-      - base: "keepassxc"
-        team_id: "G2S7R7PVXJ"  # KeePassXC
-        ppid: 1
-      - base: "KeePassXC"
-        team_id: "G2S7R7PVXJ"
-        ppid: 1
+      # KeePassXC
+      - team_id: "G2S7R7PVXJ"  # KeePassXC
       # Command-line tools
       - base: "kpcli"
 
   - pattern: "~/Library/Application Support/Bitwarden/data.json"
     allow:
-      - base: "Bitwarden"
-        team_id: "LTZ2PFU5D6"  # Bitwarden
-        ppid: 1
+      - team_id: "LTZ2PFU5D6"  # Bitwarden
 
   # Cryptocurrency Wallets
   - id: crypto_wallets
@@ -509,9 +471,7 @@ protected_files:
       - "~/.config/discord/Local Storage/leveldb/*"  # Linux
       - "/home/*/.config/discord/Local Storage/leveldb/*"
     allow:
-      - base: "Discord"
-        team_id: "53Q6R32WPB"  # Discord
-        ppid: 1
+      - team_id: "53Q6R32WPB"  # Discord
 
   # Slack
   - id: slack_data
@@ -525,9 +485,7 @@ protected_files:
       - "/home/*/.config/Slack/Cookies"
       - "/home/*/.config/Slack/Local Storage/leveldb/*"
     allow:
-      - base: "Slack"
-        team_id: "BQR82RAZA8"  # Slack
-        ppid: 1
+      - team_id: "BQR82RAZA8"  # Slack
 
   # Telegram
   - pattern: "~/Library/Application Support/Telegram Desktop/tdata/*"
@@ -549,9 +507,7 @@ protected_files:
       - "/home/*/.config/Signal/sql/db.sqlite"
       - "/home/*/.config/Signal/config.json"
     allow:
-      - base: "Signal"
-        team_id: "U68MSDN6DR"  # Signal
-        ppid: 1
+      - team_id: "U68MSDN6DR"  # Signal
 
   # Brave Browser
   - id: brave_passwords
@@ -565,9 +521,7 @@ protected_files:
       - "/home/*/.config/BraveSoftware/Brave-Browser/*/Login Data"
       - "/home/*/.config/BraveSoftware/Brave-Browser/*/Cookies"
     allow:
-      - base: "Brave Browser"
-        team_id: "KL8N8XSYF4"  # Brave
-        ppid: 1
+      - team_id: "KL8N8XSYF4"  # Brave
 
   # Edge Browser
   - id: edge_passwords
@@ -581,9 +535,7 @@ protected_files:
       - "/home/*/.config/microsoft-edge/*/Login Data"
       - "/home/*/.config/microsoft-edge/*/Cookies"
     allow:
-      - base: "Microsoft Edge"
-        team_id: "UBF8T346G9"  # Microsoft
-        ppid: 1
+      - team_id: "UBF8T346G9"  # Microsoft (Edge)
 
   # Opera Browser
   - id: opera_passwords
@@ -597,9 +549,7 @@ protected_files:
       - "/home/*/.config/opera/Login Data"
       - "/home/*/.config/opera/Cookies"
     allow:
-      - base: "Opera"
-        team_id: "A2P9LX4JPN"  # Opera
-        ppid: 1
+      - team_id: "A2P9LX4JPN"  # Opera
 
   # FileZilla
   - id: filezilla_servers
@@ -621,32 +571,24 @@ protected_files:
   # Authy Desktop
   - pattern: "~/Library/Application Support/Authy Desktop/Local Storage/leveldb/*"
     allow:
-      - base: "Authy Desktop"
-        team_id: "9EVH9FK6WT"  # Twilio
-        ppid: 1
+      - team_id: "9EVH9FK6WT"  # Twilio (Authy)
 
   # Steam
   - pattern: "~/Library/Application Support/Steam/config/loginusers.vdf"
     allow:
       - base: "steam"
         ppid: 1
-      - base: "Steam"
-        team_id: "MXGJJ98X76"  # Valve
-        ppid: 1
+      - team_id: "MXGJJ98X76"  # Valve (Steam)
 
   # Battle.net
   - pattern: "~/Library/Application Support/Battle.net/Account/*"
     allow:
-      - base: "Battle.net"
-        team_id: "L2JLF47G6D"  # Blizzard
-        ppid: 1
+      - team_id: "L2JLF47G6D"  # Blizzard
 
   # Notion
   - pattern: "~/Library/Application Support/Notion/notion.db"
     allow:
-      - base: "Notion"
-        team_id: "LBQJ96R89F"  # Notion
-        ppid: 1
+      - team_id: "LBQJ96R89F"  # Notion
 
   # TablePlus
   - id: tableplus_connections
@@ -654,9 +596,7 @@ protected_files:
       - "~/Library/Application Support/com.tinyapp.TablePlus/Data/Connections.plist"
       - "/Users/*/Library/Application Support/com.tinyapp.TablePlus/Data/Connections.plist"
     allow:
-      - base: "TablePlus"
-        team_id: "3X57WD8ENQ"  # TablePlus
-        ppid: 1
+      - team_id: "3X57WD8ENQ"  # TablePlus
 
   # Sequel Pro
   - id: sequel_pro_connections
@@ -682,23 +622,17 @@ protected_files:
   # Postman
   - pattern: "~/Library/Application Support/Postman/storage/*"
     allow:
-      - base: "Postman"
-        team_id: "H7LP8A9S8Q"  # Postman
-        ppid: 1
+      - team_id: "H7LP8A9S8Q"  # Postman
 
   # Insomnia
   - pattern: "~/Library/Application Support/Insomnia/insomnia.*.db"
     allow:
-      - base: "Insomnia"
-        team_id: "FX44YY62GV"  # Kong
-        ppid: 1
+      - team_id: "FX44YY62GV"  # Kong (Insomnia)
 
   # RDP Connection Files
   - pattern: "~/Documents/*.rdp"
     allow:
-      - base: "Microsoft Remote Desktop"
-        team_id: "UBF8T346G9"  # Microsoft
-        ppid: 1
+      - team_id: "UBF8T346G9"  # Microsoft (Remote Desktop)
 
   # VPN Configurations
   - id: vpn_configs
@@ -708,9 +642,7 @@ protected_files:
       - "~/Library/Application Support/Tunnelblick/Configurations/*"
       - "/Users/*/Library/Application Support/Tunnelblick/Configurations/*"
     allow:
-      - base: "Viscosity"
-        team_id: "34XR7GXFPX"  # SparkLabs
-        ppid: 1
+      - team_id: "34XR7GXFPX"  # SparkLabs (Viscosity)
       - base: "Tunnelblick"
         ppid: 1
 
@@ -721,9 +653,7 @@ protected_files:
       - "~/Library/Group Containers/G69SCX94XU.duck/Library/Application Support/duck/Bookmarks/*"
       - "/Users/*/Library/Group Containers/G69SCX94XU.duck/Library/Application Support/duck/Bookmarks/*"
     allow:
-      - base: "Cyberduck"
-        team_id: "G69SCX94XU"  # iterate
-        ppid: 1
+      - team_id: "G69SCX94XU"  # iterate (Cyberduck)
 
   # Transmit
   - id: transmit_favorites
@@ -731,9 +661,7 @@ protected_files:
       - "~/Library/Application Support/Transmit/Favorites/*"
       - "/Users/*/Library/Application Support/Transmit/Favorites/*"
     allow:
-      - base: "Transmit"
-        team_id: "VE8FC488U5"  # Panic
-        ppid: 1
+      - team_id: "VE8FC488U5"  # Panic (Transmit)
 
   # Git Clients (keep separate - each should only access own credentials)
   # GitHub Desktop
@@ -742,9 +670,7 @@ protected_files:
       - "~/Library/Application Support/GitHub Desktop/storage/userData.json"
       - "/Users/*/Library/Application Support/GitHub Desktop/storage/userData.json"
     allow:
-      - base: "GitHub Desktop"
-        team_id: "VEKTX9H2N7"  # GitHub
-        ppid: 1
+      - team_id: "VEKTX9H2N7"  # GitHub Desktop
 
   # SourceTree
   - id: sourcetree_accounts
@@ -752,9 +678,7 @@ protected_files:
       - "~/Library/Application Support/SourceTree/accounts.json"
       - "/Users/*/Library/Application Support/SourceTree/accounts.json"
     allow:
-      - base: "SourceTree"
-        team_id: "UPXU4CQZ5P"  # Atlassian
-        ppid: 1
+      - team_id: "UPXU4CQZ5P"  # Atlassian (SourceTree)
 
   # GitKraken
   - id: gitkraken_profiles
@@ -763,9 +687,7 @@ protected_files:
       - "/home/*/.gitkraken/profiles/*"
       - "/Users/*/.gitkraken/profiles/*"
     allow:
-      - base: "GitKraken"
-        team_id: "HV6GQZR9ZK"  # Axosoft
-        ppid: 1
+      - team_id: "HV6GQZR9ZK"  # Axosoft (GitKraken)
 
   # Shell History Files
   - id: shell_history
@@ -802,9 +724,7 @@ protected_files:
       - base: "tcsh"
       - base: "fish"
       - base: "pwsh"
-      - base: "powershell"
-        path_pattern: "/usr/local/microsoft/powershell/*/pwsh"
-        team_id: "UBF8T346G9"  # Microsoft
+      - team_id: "UBF8T346G9"  # Microsoft (PowerShell)
       # Homebrew paths for shells
       - base: "fish"
         path_pattern: "/opt/homebrew/Cellar/fish/*/bin/fish"
@@ -824,9 +744,7 @@ protected_files:
       - "/root/*/.env.*"
     allow:
       # VS Code
-      - base: "code"
-        team_id: "UBF8T346G9"  # Microsoft
-        ppid: 1
+      - team_id: "UBF8T346G9"  # Microsoft (VS Code)
       # Command-line editors
       - base: "vim"
       - base: "nvim"
