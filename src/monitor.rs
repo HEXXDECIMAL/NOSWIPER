@@ -81,8 +81,8 @@ impl Monitor {
             ));
         }
 
-        // Use 'open' event type instead of 'file'
-        let eslogger_args = ["open", "--format", "json"];
+        // Subscribe to both 'open' and 'exec' events
+        let eslogger_args = ["open", "exec", "--format", "json"];
         let eslogger_cmd = format!("eslogger {}", eslogger_args.join(" "));
 
         log::info!("Starting eslogger with command: {}", eslogger_cmd);
@@ -148,34 +148,61 @@ impl Monitor {
             // Clone data for parallel processing
             let line_clone = line.clone();
 
-            // Process critical events immediately in parallel
-            match self.parse_eslogger_event(&line) {
-                Ok(Some((process_path, file_path, pid, ppid, signing_info))) => {
-                    // For protected files, handle immediately
-                    if self.rule_engine.is_protected_file(&file_path) {
-                        // Handle synchronously for speed
-                        self.handle_file_access_with_signing(&process_path, &file_path, pid, ppid, signing_info)
-                            .await?;
-                    } else {
-                        // Log non-critical events asynchronously
-                        let process_name = process_path.file_name()
-                            .and_then(|n| n.to_str())
-                            .unwrap_or("unknown")
-                            .to_string();
-                        let pid_str = pid.map_or(String::from("?"), |p| p.to_string());
-                        let file_display = file_path.display().to_string();
-                        let verbose = self.verbose;
+            // Parse the event to determine its type
+            let json_result = serde_json::from_str::<serde_json::Value>(&line);
+            match json_result {
+                Ok(json) => {
+                    // Check if this is an open event
+                    if json.get("event").and_then(|e| e.get("open")).is_some() {
+                        match self.parse_open_event(&json) {
+                            Ok(Some((process_path, file_path, pid, ppid, signing_info))) => {
+                                // For protected files, handle immediately
+                                if self.rule_engine.is_protected_file(&file_path) {
+                                    // Handle synchronously for speed
+                                    self.handle_file_access_with_signing(&process_path, &file_path, pid, ppid, signing_info)
+                                        .await?;
+                                } else {
+                                    // Log non-critical events asynchronously
+                                    let process_display = process_path.display().to_string();
+                                    let pid_str = pid.map_or(String::from("?"), |p| p.to_string());
+                                    let file_display = file_path.display().to_string();
+                                    let verbose = self.verbose;
 
-                        tokio::spawn(async move {
-                            if verbose {
-                                log::info!("{}[{}]: open {}: OK", process_name, pid_str, file_display);
+                                    tokio::spawn(async move {
+                                        if verbose {
+                                            log::info!("{}[{}]: open {}: OK", process_display, pid_str, file_display);
+                                        }
+                                    });
+                                }
                             }
-                        });
+                            Ok(None) => {
+                                log::trace!("Open event parsed but not relevant (directory or filtered)");
+                            }
+                            Err(e) => {
+                                log::debug!("Failed to parse open event: {}", e);
+                            }
+                        }
                     }
-                }
-                Ok(None) => {
-                    // Event parsed but not relevant (not a file access we care about)
-                    log::trace!("Event parsed but not an open event or not relevant");
+                    // Check if this is an exec event
+                    else if json.get("event").and_then(|e| e.get("exec")).is_some() {
+                        match self.parse_exec_event(&json) {
+                            Ok(Some((process_path, args, pid, ppid, signing_info))) => {
+                                // Check if any argument contains a protected path
+                                if let Some(protected_path) = self.check_args_for_protected_paths(&args) {
+                                    self.handle_exec_with_protected_path(&process_path, &args, &protected_path, pid, ppid, signing_info)
+                                        .await?;
+                                }
+                            }
+                            Ok(None) => {
+                                log::trace!("Exec event parsed but not relevant");
+                            }
+                            Err(e) => {
+                                log::debug!("Failed to parse exec event: {}", e);
+                            }
+                        }
+                    } else {
+                        log::trace!("Event is neither open nor exec");
+                    }
                 }
                 Err(e) => {
                     // Log parsing errors at higher level for first few events
@@ -240,21 +267,9 @@ impl Monitor {
         exists
     }
 
-    fn parse_eslogger_event(&self, line: &str) -> Result<Option<(PathBuf, PathBuf, Option<u32>, Option<u32>, Option<String>)>> {
-        // Try to parse as generic JSON first to see structure
-        let json: serde_json::Value = serde_json::from_str(line)?;
+    fn parse_open_event(&self, json: &serde_json::Value) -> Result<Option<(PathBuf, PathBuf, Option<u32>, Option<u32>, Option<String>)>> {
 
-        // Check if this is an open event (event_type == 10 means open)
-        let is_open = json.get("event_type")
-            .and_then(|t| t.as_u64())
-            .map(|t| t == 10)
-            .unwrap_or(false)
-            || json.get("event").and_then(|e| e.get("open")).is_some();
-
-        if !is_open {
-            log::trace!("Not an open event, skipping");
-            return Ok(None);
-        }
+        // This function assumes it's already been verified as an open event
 
         // Check if this is a directory (st_mode & 0170000 == 0040000)
         let is_directory = json.get("event")
@@ -325,6 +340,317 @@ impl Monitor {
             ppid,
             signing_info,
         )))
+    }
+
+    fn parse_exec_event(&self, json: &serde_json::Value) -> Result<Option<(PathBuf, Vec<String>, Option<u32>, Option<u32>, Option<String>)>> {
+        // Extract process executable path
+        let process_path = json.get("event")
+            .and_then(|e| e.get("exec"))
+            .and_then(|e| e.get("target"))
+            .and_then(|t| t.get("executable"))
+            .and_then(|e| e.get("path"))
+            .and_then(|p| p.as_str())
+            .ok_or_else(|| anyhow::anyhow!("No process path in exec event"))?;
+
+        // Extract command-line arguments
+        let args = json.get("event")
+            .and_then(|e| e.get("exec"))
+            .and_then(|e| e.get("args"))
+            .and_then(|a| a.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str())
+                    .map(|s| s.to_string())
+                    .collect::<Vec<String>>()
+            })
+            .unwrap_or_else(Vec::new);
+
+        // Extract PID from audit_token
+        let pid = json.get("process")
+            .and_then(|p| p.get("audit_token"))
+            .and_then(|t| t.get("pid"))
+            .and_then(|p| p.as_u64())
+            .map(|p| p as u32);
+
+        // Extract parent PID (ppid)
+        let ppid = json.get("process")
+            .and_then(|p| p.get("ppid"))
+            .and_then(|p| p.as_u64())
+            .map(|p| p as u32);
+
+        // Extract signing info
+        let signing_id = json.get("process")
+            .and_then(|p| p.get("signing_id"))
+            .and_then(|s| s.as_str());
+
+        let team_id = json.get("process")
+            .and_then(|p| p.get("team_id"))
+            .and_then(|t| t.as_str());
+
+        let signing_info = match (signing_id, team_id) {
+            (Some(sid), Some(tid)) => Some(format!("{} [{}]", sid, tid)),
+            (Some(sid), None) => Some(sid.to_string()),
+            (None, Some(tid)) => Some(format!("[{}]", tid)),
+            (None, None) => None,
+        };
+
+        Ok(Some((
+            PathBuf::from(process_path),
+            args,
+            pid,
+            ppid,
+            signing_info,
+        )))
+    }
+
+    fn check_args_for_protected_paths(&self, args: &[String]) -> Option<PathBuf> {
+        for arg in args {
+            // Expand tilde in the argument
+            let expanded = shellexpand::tilde(arg).to_string();
+            let path = PathBuf::from(&expanded);
+
+            // Check if this path or any of its parent directories are protected
+            // This catches both direct references and references to files within protected dirs
+            if self.rule_engine.is_protected_file(&path) {
+                return Some(path);
+            }
+
+            // Also check if the argument contains a protected path as a substring
+            // This catches cases like "data=@~/.ssh/id_rsa" or "--file=/home/user/.aws/credentials"
+            for protected_pattern in &self.rule_engine.get_protected_patterns() {
+                let expanded_pattern = shellexpand::tilde(protected_pattern).to_string();
+                if expanded.contains(&expanded_pattern) {
+                    return Some(PathBuf::from(expanded_pattern));
+                }
+            }
+        }
+        None
+    }
+
+    async fn handle_exec_with_protected_path(
+        &mut self,
+        process_path: &Path,
+        args: &[String],
+        protected_path: &Path,
+        pid: Option<u32>,
+        ppid: Option<u32>,
+        signing_info: Option<String>,
+    ) -> Result<()> {
+        // Resolve symlinks to get real paths
+        let real_process_path = self.normalize_path(process_path);
+        let real_protected_path = self.normalize_path(protected_path);
+
+        // Get code signing info
+        let pid_str = pid.map_or(String::from("?"), |p| p.to_string());
+        let ppid_str = ppid.map_or(String::from("?"), |p| p.to_string());
+
+        let signer_info = signing_info
+            .as_ref()
+            .map(|s| format!(" [{}]", s))
+            .unwrap_or_default();
+
+        // Check if this process is allowed to access the protected path
+        let decision = self
+            .rule_engine
+            .check_access(&real_process_path, &real_protected_path, signing_info.as_deref());
+
+        match decision {
+            Decision::Allow => {
+                // Always log allowed exec with protected paths
+                log::info!(
+                    "{}[{}/ppid:{}]{}: exec with {}: OK (allowed)",
+                    real_process_path.display(),
+                    pid_str,
+                    ppid_str,
+                    signer_info,
+                    real_protected_path.display()
+                );
+            }
+            Decision::Deny => {
+                match self.mode {
+                    Mode::Monitor => {
+                        // Build log message
+                        let mut log_msg = format!(
+                            "{}[{}/ppid:{}]{}: exec with {}: DETECTED (monitor mode)",
+                            real_process_path.display(),
+                            pid_str,
+                            ppid_str,
+                            signer_info,
+                            real_protected_path.display()
+                        );
+
+                        // Add command line
+                        log_msg.push_str(&format!("\n  Args: {}", args.join(" ")));
+
+                        // Get parent command line if available
+                        let parent_cmdline = if let Some(ppid) = ppid {
+                            if ppid > 1 {
+                                self.get_process_cmdline(ppid)
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        };
+
+                        if let Some(parent_cmd) = parent_cmdline {
+                            log_msg.push_str(&format!("\n  ↳ Parent: {}", parent_cmd));
+                        }
+
+                        log::warn!("{}", log_msg);
+                    }
+                    Mode::Enforce => {
+                        #[cfg(target_os = "macos")]
+                        if let Some(pid) = pid {
+                            // Suspend the process immediately
+                            let stopped = self.suspend_process(pid);
+
+                            // Always try to suspend parent if requested, even if child already exited
+                            let (parent_stopped, parent_cmdline) = if self.stop_parent {
+                                if let Some(ppid) = ppid {
+                                    if ppid > 1 {
+                                        if self.suspend_process(ppid) {
+                                            let parent_cmd = self.get_process_cmdline(ppid);
+                                            if let Some(ref cmd) = parent_cmd {
+                                                log::info!("Stopped parent process (PID {}): {}", ppid, cmd);
+                                            } else {
+                                                log::info!("Stopped parent process (PID {})", ppid);
+                                            }
+                                            (true, parent_cmd)
+                                        } else {
+                                            log::debug!("Failed to stop parent process (PID {})", ppid);
+                                            (false, None)
+                                        }
+                                    } else {
+                                        (false, None)
+                                    }
+                                } else {
+                                    (false, None)
+                                }
+                            } else {
+                                (false, None)
+                            };
+
+                            if stopped {
+                                let parent_info = if parent_stopped {
+                                    format!(" + parent[{}]", ppid.unwrap())
+                                } else {
+                                    String::new()
+                                };
+
+                                // Build log message
+                                let mut log_msg = format!(
+                                    "{}[{}/ppid:{}]{}: exec with {}: STOPPED{}",
+                                    real_process_path.display(),
+                                    pid,
+                                    ppid.map_or(String::from("?"), |p| p.to_string()),
+                                    signer_info,
+                                    real_protected_path.display(),
+                                    parent_info
+                                );
+
+                                log_msg.push_str(&format!("\n  Args: {}", args.join(" ")));
+
+                                if let Some(parent_cmd) = parent_cmdline {
+                                    log_msg.push_str(&format!("\n  ↳ Parent: {}", parent_cmd));
+                                }
+
+                                log::error!("{}", log_msg);
+                            } else {
+                                // Process exited but try to stop parent anyway
+                                let parent_stopped = if self.stop_parent {
+                                    if let Some(ppid) = ppid {
+                                        if ppid > 1 {
+                                            if self.suspend_process(ppid) {
+                                                let parent_cmd = self.get_process_cmdline(ppid);
+                                                if let Some(ref cmd) = parent_cmd {
+                                                    log::info!("Stopped parent process (PID {}): {}", ppid, cmd);
+                                                } else {
+                                                    log::info!("Stopped parent process (PID {})", ppid);
+                                                }
+                                                true
+                                            } else {
+                                                log::debug!("Failed to stop parent process (PID {})", ppid);
+                                                false
+                                            }
+                                        } else {
+                                            false
+                                        }
+                                    } else {
+                                        false
+                                    }
+                                } else {
+                                    false
+                                };
+
+                                let parent_info = if parent_stopped {
+                                    format!(" (parent[{}] stopped)", ppid.unwrap())
+                                } else {
+                                    String::new()
+                                };
+
+                                log::error!(
+                                    "{}[{}/ppid:{}]{}: exec with {}: VIOLATION (process exited){}",
+                                    real_process_path.display(),
+                                    pid,
+                                    ppid.map_or(String::from("?"), |p| p.to_string()),
+                                    signer_info,
+                                    real_protected_path.display(),
+                                    parent_info
+                                );
+                            }
+                        }
+                    }
+                    Mode::Interactive => {
+                        // Similar to open, but for exec
+                        #[cfg(target_os = "macos")]
+                        if let Some(pid) = pid {
+                            if self.suspend_process(pid) {
+                                log::warn!(
+                                    "{}[{}]{}: exec with {}: SUSPENDED (waiting for user)",
+                                    real_process_path.display(),
+                                    pid,
+                                    signer_info,
+                                    real_protected_path.display()
+                                );
+                            }
+                        }
+
+                        let allow = self
+                            .handle_interactive_prompt_with_pid(
+                                &real_process_path,
+                                &real_protected_path,
+                                pid,
+                            )
+                            .await?;
+
+                        #[cfg(target_os = "macos")]
+                        if let Some(pid) = pid {
+                            if allow {
+                                self.resume_process(pid);
+                                log::info!(
+                                    "{}[{}]{}: exec with {}: RESUMED (user allowed)",
+                                    real_process_path.display(),
+                                    pid,
+                                    signer_info,
+                                    real_protected_path.display()
+                                );
+                            } else {
+                                log::error!(
+                                    "{}[{}]{}: exec with {}: STOPPED (user denied)",
+                                    real_process_path.display(),
+                                    pid,
+                                    signer_info,
+                                    real_protected_path.display()
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(())
     }
 
     async fn handle_file_access_with_signing(
@@ -435,20 +761,21 @@ impl Monitor {
                             // Suspend the process
                             let stopped = self.suspend_process(pid);
 
-                            // Also suspend parent if requested and possible
-                            let (parent_stopped, parent_cmdline) = if self.stop_parent && stopped {
+                            // Always try to suspend parent if requested, even if child already exited
+                            let (parent_stopped, parent_cmdline) = if self.stop_parent {
                                 if let Some(ppid) = ppid {
                                     if ppid > 1 {  // Don't try to stop init (pid 1)
                                         if self.suspend_process(ppid) {
                                             // Get parent command line after stopping it
                                             let parent_cmd = self.get_process_cmdline(ppid);
                                             if let Some(ref cmd) = parent_cmd {
-                                                log::info!("Also stopped parent process (PID {}): {}", ppid, cmd);
+                                                log::info!("Stopped parent process (PID {}): {}", ppid, cmd);
                                             } else {
-                                                log::info!("Also stopped parent process (PID {})", ppid);
+                                                log::info!("Stopped parent process (PID {})", ppid);
                                             }
                                             (true, parent_cmd)
                                         } else {
+                                            log::debug!("Failed to stop parent process (PID {})", ppid);
                                             (false, None)
                                         }
                                     } else {
@@ -492,14 +819,46 @@ impl Monitor {
 
                                 log::error!("{}", log_msg);
                             } else {
-                                // Process likely exited already - still log the violation
+                                // Process exited but try to stop parent anyway
+                                let parent_stopped = if self.stop_parent {
+                                    if let Some(ppid) = ppid {
+                                        if ppid > 1 {
+                                            if self.suspend_process(ppid) {
+                                                let parent_cmd = self.get_process_cmdline(ppid);
+                                                if let Some(ref cmd) = parent_cmd {
+                                                    log::info!("Stopped parent process (PID {}): {}", ppid, cmd);
+                                                } else {
+                                                    log::info!("Stopped parent process (PID {})", ppid);
+                                                }
+                                                true
+                                            } else {
+                                                log::debug!("Failed to stop parent process (PID {})", ppid);
+                                                false
+                                            }
+                                        } else {
+                                            false
+                                        }
+                                    } else {
+                                        false
+                                    }
+                                } else {
+                                    false
+                                };
+
+                                let parent_info = if parent_stopped {
+                                    format!(" (parent[{}] stopped)", ppid.unwrap())
+                                } else {
+                                    String::new()
+                                };
+
                                 log::error!(
-                                    "{}[{}/ppid:{}]{}: open {}: VIOLATION (process exited)",
+                                    "{}[{}/ppid:{}]{}: open {}: VIOLATION (process exited){}",
                                     real_process_path.display(),
                                     pid,
                                     ppid.map_or(String::from("?"), |p| p.to_string()),
                                     signer_info,
-                                    real_file_path.display()
+                                    real_file_path.display(),
+                                    parent_info
                                 );
                             }
                         } else {

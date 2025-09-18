@@ -47,6 +47,14 @@ impl RuleEngine {
         false
     }
 
+    /// Get list of protected patterns for checking command arguments
+    pub fn get_protected_patterns(&self) -> Vec<String> {
+        self.config.protected_files
+            .iter()
+            .map(|pf| pf.pattern.clone())
+            .collect()
+    }
+
     /// Check if a process is allowed to access a file
     pub fn check_access(&self, process_path: &Path, file_path: &Path, signing_info: Option<&str>) -> Decision {
         // First check runtime exceptions
