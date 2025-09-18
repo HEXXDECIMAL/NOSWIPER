@@ -3,11 +3,14 @@ mod defaults;
 mod monitor;
 mod rules;
 
-use cli::{Args, LogLevel};
-use clap::Parser;
-use monitor::Monitor;
+#[cfg(target_os = "linux")]
+mod linux_monitor;
+
 use anyhow::Result;
-use log::{info, error};
+use clap::Parser;
+use cli::{Args, LogLevel};
+use log::{error, info};
+use monitor::Monitor;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -37,7 +40,7 @@ async fn main() -> Result<()> {
     check_root_privileges()?;
 
     // Show startup information
-    info!("NoSwiper daemon starting");
+    info!("NoSwiper agent starting");
     info!("Version: {}", env!("CARGO_PKG_VERSION"));
     info!("Mode: {}", args.get_mode());
     info!("Mechanism: {}", args.get_mechanism());
@@ -191,7 +194,10 @@ fn show_config() {
 
 fn validate_config(config_path: &std::path::Path) -> Result<()> {
     if !config_path.exists() {
-        return Err(anyhow::anyhow!("Configuration file does not exist: {}", config_path.display()));
+        return Err(anyhow::anyhow!(
+            "Configuration file does not exist: {}",
+            config_path.display()
+        ));
     }
 
     // For now, just check if it's a valid file
@@ -201,9 +207,7 @@ fn validate_config(config_path: &std::path::Path) -> Result<()> {
             println!("✓ Configuration file is valid: {}", config_path.display());
             Ok(())
         }
-        Err(e) => {
-            Err(anyhow::anyhow!("Failed to read configuration file: {}", e))
-        }
+        Err(e) => Err(anyhow::anyhow!("Failed to read configuration file: {}", e)),
     }
 }
 

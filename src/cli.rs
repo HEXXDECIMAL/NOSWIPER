@@ -1,17 +1,13 @@
 use clap::{Parser, ValueEnum};
 
 #[derive(Parser)]
-#[command(name = "noswiper-daemon")]
-#[command(about = "Simple Rust-based credential protection daemon")]
+#[command(name = "noswiper-agent")]
+#[command(about = "Simple Rust-based credential protection agent")]
 #[command(version)]
 pub struct Args {
     /// Run in monitor-only mode (log access attempts but don't block)
     #[arg(long)]
     pub monitor: bool,
-
-    /// Run in enforce mode (block unauthorized access)
-    #[arg(long)]
-    pub enforce: bool,
 
     /// Run in interactive mode (prompt user via CLI for decisions)
     #[arg(long)]
@@ -68,7 +64,7 @@ pub enum LogLevel {
     Error,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum Mode {
     Monitor,     // Just log access attempts
     Enforce,     // Block unauthorized access silently
@@ -79,10 +75,11 @@ impl Args {
     pub fn get_mode(&self) -> Mode {
         if self.interactive {
             Mode::Interactive
-        } else if self.enforce {
-            Mode::Enforce
-        } else {
+        } else if self.monitor {
             Mode::Monitor
+        } else {
+            // Default to enforce mode
+            Mode::Enforce
         }
     }
 
@@ -92,14 +89,14 @@ impl Args {
 
     pub fn validate(&self) -> anyhow::Result<()> {
         // Only one mode can be active
-        let mode_count = [self.monitor, self.enforce, self.interactive]
+        let mode_count = [self.monitor, self.interactive]
             .iter()
             .filter(|&&x| x)
             .count();
 
         if mode_count > 1 {
             return Err(anyhow::anyhow!(
-                "Only one mode can be specified: --monitor, --enforce, or --interactive"
+                "Only one mode can be specified: --monitor or --interactive"
             ));
         }
 

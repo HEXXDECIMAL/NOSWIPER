@@ -9,17 +9,17 @@
 cargo build --release
 
 # Check the help
-./target/release/noswiper-daemon --help
+./target/release/noswiper-agent --help
 
 # View the default configuration
-./target/release/noswiper-daemon --show-config
+./target/release/noswiper-agent --show-config
 ```
 
 ### 2. Test Interactive Mode (Recommended for First Use)
 
 ```bash
 # Start the daemon in interactive mode (requires sudo)
-sudo ./target/release/noswiper-daemon --interactive
+sudo ./target/release/noswiper-agent --interactive
 ```
 
 You should see:
@@ -45,8 +45,8 @@ In another terminal, try accessing a protected file:
 # Try to read SSH private key (will be detected)
 cat ~/.ssh/id_rsa
 
-# Or with a different tool
-/bin/cat ~/.ssh/id_rsa
+# On macOS: The process will be SUSPENDED if in enforce/interactive mode
+# You'll see the cat command hang/freeze
 
 # Try accessing AWS credentials
 cat ~/.aws/credentials
@@ -62,6 +62,8 @@ When you access a protected file, you'll see a prompt like this:
 ============================================================
 Application: cat
 Full path:   /bin/cat
+Process ID:  12345
+Status:      SUSPENDED (waiting for decision)
 Credential:  /Users/yourname/.ssh/id_rsa
 
 This application is trying to access sensitive credentials.
@@ -75,12 +77,14 @@ Options:
 Decision [A/d/w/s]?
 ```
 
+**Note on macOS**: The violating process is suspended (SIGSTOP) while waiting for your decision!
+
 ### 5. Test Different Options
 
-- **[A]llow once**: Allows this specific access and logs it
-- **[D]eny**: Denies access (default if you just press Enter)
+- **[A]llow once**: Resumes the process and allows access (macOS) or allows access (Linux)
+- **[D]eny**: Keeps process suspended (macOS) or denies access (Linux)
 - **[W]hitelist**: Permanently allows this app to access this credential
-- **[S]how more info**: Shows additional information about the process
+- **[S]how more info**: Shows additional information about the process including suspension state
 
 ### 6. Test Legitimate Access
 
@@ -94,7 +98,7 @@ git fetch
 
 You should see log messages like:
 ```
-[INFO] ALLOWED: /usr/bin/ssh -> /Users/yourname/.ssh/id_rsa
+[INFO] ssh[12345]: open /Users/yourname/.ssh/id_rsa: OK
 ```
 
 ## Production Usage
@@ -103,37 +107,45 @@ You should see log messages like:
 
 ```bash
 # Just log access attempts, don't block anything
-sudo ./target/release/noswiper-daemon --monitor
+sudo ./target/release/noswiper-agent --monitor
 ```
 
 ### Enforce Mode (Block Unauthorized Access)
 
 ```bash
 # Block unauthorized access attempts
-sudo ./target/release/noswiper-daemon --enforce
+sudo ./target/release/noswiper-agent --enforce
 ```
 
-**Note**: On macOS with eslogger, this currently only logs violations. For real blocking, ESF support is needed (future version).
+**macOS**: Suspends violating processes indefinitely using SIGSTOP
+**Linux**: Actually blocks access at the kernel level with "Permission denied"
 
 ## Log Output Examples
 
 ### Allowed Access
 ```
-[INFO] ALLOWED: /usr/bin/ssh -> /Users/alice/.ssh/id_rsa
-[INFO] ALLOWED: /usr/bin/git -> /Users/alice/.ssh/id_rsa
+[INFO] ssh[12345]: open /Users/alice/.ssh/id_rsa: OK
+[INFO] git[12346] [Developer ID Application: Git Foundation]: open /Users/alice/.ssh/id_rsa: OK
 ```
 
-### Blocked Access
+### Blocked Access (Monitor Mode)
 ```
-[WARN] DETECTED: /bin/cat -> /Users/alice/.ssh/id_rsa
-[ERROR] BLOCKED: /tmp/malware -> /Users/alice/.ssh/id_rsa
+[WARN] cat[12347]: open /Users/alice/.ssh/id_rsa: DETECTED (monitor mode)
+[WARN] malware[12348]: open /Users/alice/.ssh/id_rsa: DETECTED (monitor mode)
+```
+
+### Blocked Access (Enforce Mode - Default)
+```
+[ERROR] cat[12349]: open /Users/alice/.ssh/id_rsa: STOPPED
+[ERROR] malware[12350]: open /Users/alice/.aws/credentials: STOPPED
 ```
 
 ### Interactive Decisions
 ```
-[INFO] User allowed access: cat -> /Users/alice/.ssh/id_rsa
-[INFO] User whitelisted: backup-tool -> /Users/alice/.ssh/id_rsa
-[WARN] User denied access: suspicious-app -> /Users/alice/.ssh/id_rsa
+[WARN] cat[12351]: open /Users/alice/.ssh/id_rsa: SUSPENDED (waiting for user)
+[INFO] cat[12351]: open /Users/alice/.ssh/id_rsa: RESUMED (user allowed)
+[INFO] backup-tool[12352]: open /Users/alice/.ssh/id_rsa: OK (whitelisted)
+[ERROR] suspicious-app[12353]: open /Users/alice/.ssh/id_rsa: STOPPED (user denied)
 ```
 
 ## Testing Specific Scenarios
@@ -217,7 +229,7 @@ xcode-select --install
 ```
 
 ### No Events Detected
-- Make sure you're running as root: `sudo ./target/release/noswiper-daemon`
+- Make sure you're running as root: `sudo ./target/release/noswiper-agent`
 - Check that you have protected files: `ls ~/.ssh/id_*`
 - Try creating a test SSH key: `ssh-keygen -t rsa -f ~/.ssh/test_key`
 
@@ -231,7 +243,7 @@ xcode-select --install
 
 ## Next Steps
 
-1. **Install systemwide**: Copy binary to `/usr/local/bin/noswiper-daemon`
+1. **Install systemwide**: Copy binary to `/usr/local/bin/noswiper-agent`
 2. **Create service**: Set up systemd (Linux) or launchd (macOS) service
 3. **Configure logging**: Set up log rotation and monitoring
 4. **Test thoroughly**: Run in monitor mode for a while before enabling enforce mode

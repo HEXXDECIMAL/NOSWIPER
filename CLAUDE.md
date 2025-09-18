@@ -10,15 +10,15 @@ NoSwiper is a minimal credential protection tool written in Rust. It monitors ac
 
 ```
 Phase 1: MVP with Interactive CLI
-├── noswiper-daemon (runs as root)
+├── noswiper-agent (runs as root)
 │   ├── --monitor: Log only (default)
 │   ├── --enforce: Block and log
 │   └── --interactive: Block and prompt via CLI
 │
-Phase 2: Add GUI Agent
-├── noswiper-daemon (runs as root)
+Phase 2: Add GUI Client
+├── noswiper-agent (runs as root)
 │   └── IPC Server (Unix socket)
-├── noswiper-agent (runs as user)
+├── noswiper-client (runs as user)
 │   └── GUI dialogs + system tray
 ```
 
@@ -86,13 +86,13 @@ Multi-layer defense:
 
 ```bash
 # Development/Testing: Use interactive mode
-sudo noswiper-daemon --interactive
+sudo noswiper-agent --interactive
 
 # Server Deployment: Enforce mode with logging
-sudo noswiper-daemon --enforce
+sudo noswiper-agent --enforce
 
 # Desktop Deployment: Daemon + Agent
-sudo noswiper-daemon --enforce &
+sudo noswiper-agent --enforce &
 noswiper-agent  # Runs as user, shows GUI dialogs
 ```
 

@@ -3,13 +3,13 @@ name = "noswiper"
 version = "0.1.0"
 edition = "2021"
 authors = ["Your Name <your.email@example.com>"]
-description = "Simple Rust-based credential protection daemon"
+description = "Simple Rust-based credential protection agent"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/yourusername/noswiper"
 keywords = ["security", "credentials", "protection", "daemon"]
 
 [[bin]]
-name = "noswiper-daemon"
+name = "noswiper-agent"
 path = "src/main.rs"
 
 [dependencies]
@@ -29,8 +29,7 @@ libc = "0.2"
 # No additional dependencies needed for eslogger approach
 
 [target.'cfg(target_os = "linux")'.dependencies]
-libc = "0.2"
-nix = "0.27"
+nix = { version = "0.27", features = ["fs", "process", "signal", "user"] }
 
 [dev-dependencies]
 tempfile = "3.0"

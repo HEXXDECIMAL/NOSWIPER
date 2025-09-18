@@ -8,7 +8,7 @@ NoSwiper is a minimal credential protection daemon that monitors access to sensi
 - **Interactive CLI mode** for testing and debugging
 - **Platform-specific monitoring**:
   - macOS: Uses `eslogger` (no entitlements required)
-  - Linux: `fanotify` support (planned)
+  - Linux: `fanotify` support with real-time blocking capability
 - **Built-in protection** for common credentials:
   - SSH keys
   - Cloud provider credentials (AWS, GCP, Azure)
@@ -24,6 +24,10 @@ NoSwiper is a minimal credential protection daemon that monitors access to sensi
   # eslogger is typically available on macOS 11+
   # Check with: which eslogger
   ```
+
+### Linux
+- Kernel 2.6.37+ (for fanotify support)
+- Root privileges (required for fanotify)
 
 ### All Platforms
 - Rust 1.70+ (for building from source)
@@ -41,7 +45,7 @@ cargo build --release
 
 ```bash
 # Copy binary to system location
-sudo cp target/release/noswiper-daemon /usr/local/bin/
+sudo cp target/release/noswiper-agent /usr/local/bin/
 
 # macOS: Create log directory
 sudo mkdir -p /var/log/noswiper
@@ -54,26 +58,31 @@ sudo mkdir -p /var/log/noswiper
 ### Basic Usage
 
 ```bash
+# Default: Enforce mode (block unauthorized access)
+sudo noswiper-agent
+
 # Monitor mode (log only, no blocking)
-sudo noswiper-daemon --monitor
+sudo noswiper-agent --monitor
 
 # Interactive mode (prompt user for decisions)
-sudo noswiper-daemon --interactive
-
-# Enforce mode (block unauthorized access)
-sudo noswiper-daemon --enforce
+sudo noswiper-agent --interactive
 ```
 
 ### Command Line Options
 
 ```bash
-noswiper-daemon [OPTIONS]
+noswiper-agent [OPTIONS]
 
 Options:
   --monitor        Monitor-only mode (log access attempts but don't block)
-  --enforce        Enforce mode (block unauthorized access)
   --interactive    Interactive mode (prompt user via CLI for decisions)
-  --mechanism      Monitoring mechanism: auto, eslogger, esf, fanotify, ebpf
+                   (default is enforce mode - block unauthorized access)
+  --mechanism      Monitoring mechanism:
+                   - auto: Automatically select best available
+                   - eslogger: macOS only, no blocking capability
+                   - esf: macOS only, requires entitlements (planned)
+                   - fanotify: Linux only, can block access
+                   - ebpf: Linux only, requires newer kernel (planned)
   --log-level      Log level: debug, info, warn, error [default: info]
   --show-config    Show current configuration and exit
   --help           Print help
@@ -84,7 +93,7 @@ Options:
 
 1. **Start in interactive mode** (recommended for testing):
    ```bash
-   sudo noswiper-daemon --interactive
+   sudo noswiper-agent --interactive
    ```
 
 2. **Try accessing protected files**:
@@ -178,31 +187,37 @@ cargo test
 
 ```bash
 # Run with debug logging
-sudo noswiper-daemon --interactive --log-level debug
+sudo noswiper-agent --interactive --log-level debug
 ```
 
 ### Platform-Specific Notes
 
 #### macOS
 - Uses `eslogger` by default (no entitlements required)
-- ESF support planned (requires code signing and entitlements)
+- **Process suspension**: Can suspend violating processes using SIGSTOP
 - Validates code signatures when available
+- Interactive mode: Suspends process while waiting for user decision
+- Enforce mode: Suspends violating processes indefinitely
 
 #### Linux
-- fanotify support planned
-- eBPF support planned for newer kernels
+- Uses `fanotify` for real-time file access monitoring
+- **Can actually block unauthorized access** in enforce mode
+- Requires kernel 2.6.37+ (most modern Linux distributions)
+- eBPF support planned for newer kernels (5.8+)
+- Verifies processes via package manager (dpkg/rpm)
 - Uses systemd journal for logging
 
 ## Limitations
 
 ### Current Version (0.1.0)
-- **Logging only on macOS**: `eslogger` cannot actually block file access, only log it
+- **macOS**: Process suspension via SIGSTOP (not true blocking but effective)
+- **Linux**: Full kernel-level blocking via fanotify
 - **No GUI**: Command-line interface only
 - **Basic rules**: Uses built-in rules only (no custom configuration yet)
 
 ### Future Versions
 - Real-time blocking on macOS (via ESF)
-- Linux support (fanotify/eBPF)
+- Enhanced Linux support with eBPF for newer kernels
 - GUI application for desktop users
 - Custom configuration files
 - Encrypted IPC between daemon and UI

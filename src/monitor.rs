@@ -4,13 +4,24 @@ use anyhow::Result;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use tokio::io::{BufReader, AsyncBufReadExt};
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command as TokioCommand;
+
+#[cfg(target_os = "linux")]
+use crate::linux_monitor::LinuxMonitor;
 
 pub struct Monitor {
     rule_engine: RuleEngine,
     mode: Mode,
     mechanism: Mechanism,
+}
+
+// Try multiple possible JSON structures since eslogger format may vary
+#[derive(Deserialize, Debug)]
+#[serde(untagged)]
+enum EsloggerEventWrapper {
+    Standard(EsloggerEvent),
+    Compact(CompactEsloggerEvent),
 }
 
 #[derive(Deserialize, Debug)]
@@ -22,27 +33,45 @@ struct EsloggerEvent {
 }
 
 #[derive(Deserialize, Debug)]
+struct CompactEsloggerEvent {
+    process: ProcessInfo,
+    #[serde(rename = "open")]
+    open_info: Option<OpenInfo>,
+}
+
+#[derive(Deserialize, Debug)]
+struct OpenInfo {
+    file: FileInfo,
+}
+
+#[derive(Deserialize, Debug)]
 struct ProcessInfo {
     #[serde(rename = "executable")]
-    executable_path: Option<String>,
+    executable_path: Option<serde_json::Value>,  // Can be string or object
     #[serde(rename = "name")]
-    name: Option<String>,
+    _name: Option<String>,
     #[serde(rename = "pid")]
     pid: Option<u32>,
+    #[serde(rename = "signing_id")]
+    signing_id: Option<String>,
+    #[serde(rename = "team_id")]
+    team_id: Option<String>,
 }
 
 #[derive(Deserialize, Debug)]
 struct EventInfo {
     #[serde(rename = "type")]
     event_type: String,
-    #[serde(rename = "file")]
-    file_info: Option<FileInfo>,
+    #[serde(rename = "open")]
+    open_info: Option<OpenInfo>,
 }
 
 #[derive(Deserialize, Debug)]
 struct FileInfo {
     #[serde(rename = "path")]
     path: Option<String>,
+    #[serde(rename = "destination")]
+    destination: Option<String>,  // Some eslogger versions use this
 }
 
 impl Monitor {
@@ -55,7 +84,7 @@ impl Monitor {
     }
 
     pub async fn start(&mut self) -> Result<()> {
-        log::info!("Starting NoSwiper daemon in {} mode", self.mode);
+        log::info!("Starting NoSwiper agent in {} mode", self.mode);
         log::info!("Using monitoring mechanism: {}", self.mechanism);
 
         if let Mode::Interactive = self.mode {
@@ -84,6 +113,7 @@ impl Monitor {
     #[cfg(target_os = "macos")]
     async fn monitor_with_eslogger(&mut self) -> Result<()> {
         log::info!("Using eslogger mechanism");
+        log::info!("Note: eslogger requires Full Disk Access permission on macOS");
 
         // Check if eslogger is available
         if !self.check_eslogger_available() {
@@ -92,96 +122,257 @@ impl Monitor {
             ));
         }
 
+        // Use 'open' event type instead of 'file'
+        let eslogger_args = ["open", "--format", "json"];
+        let eslogger_cmd = format!("eslogger {}", eslogger_args.join(" "));
+
+        log::info!("Starting eslogger with command: {}", eslogger_cmd);
+
         // Start eslogger process
         let mut child = TokioCommand::new("eslogger")
-            .args(&["file", "--format", "json"])
+            .args(&eslogger_args)
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
-            .spawn()?;
+            .spawn()
+            .map_err(|e| {
+                anyhow::anyhow!("Failed to spawn eslogger process: {}. Command was: {}", e, eslogger_cmd)
+            })?;
 
-        log::info!("Started eslogger process");
+        log::info!("Started eslogger process with PID: {:?}", child.id());
 
         let stdout = child
             .stdout
             .take()
             .ok_or_else(|| anyhow::anyhow!("Failed to capture eslogger stdout"))?;
 
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("Failed to capture eslogger stderr"))?;
+
+        // Spawn a task to read stderr and collect error messages
+        let stderr_reader = BufReader::new(stderr);
+        let mut stderr_lines = stderr_reader.lines();
+        let (stderr_tx, mut stderr_rx) = tokio::sync::mpsc::channel::<String>(10);
+        tokio::spawn(async move {
+            while let Ok(Some(line)) = stderr_lines.next_line().await {
+                log::error!("eslogger stderr: {}", line);
+                let _ = stderr_tx.send(line).await;
+            }
+        });
+
         let reader = BufReader::new(stdout);
         let mut lines = reader.lines();
+        let mut event_count = 0;
+
+        log::info!("Listening for file access events...");
+
+        // Check if we're getting any output at all
+        tokio::spawn(async move {
+            tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+            log::warn!("If you don't see any events after 5 seconds, try opening files in another terminal");
+        });
 
         while let Some(line) = lines.next_line().await? {
             if line.trim().is_empty() {
                 continue;
             }
 
+            event_count += 1;
+
+            // Log first few events at info level to debug
+            if event_count <= 5 {
+                log::info!("Raw eslogger event #{}: {}", event_count, line);
+            } else if event_count % 100 == 0 {
+                log::debug!("Processed {} eslogger events", event_count);
+            }
+
+            // Log raw events in debug mode
+            log::trace!("Raw eslogger event: {}", line);
+
             match self.parse_eslogger_event(&line) {
-                Ok(Some((process_path, file_path))) => {
-                    self.handle_file_access(&process_path, &file_path).await?;
+                Ok(Some((process_path, file_path, pid))) => {
+                    self.handle_file_access_with_pid(&process_path, &file_path, pid)
+                        .await?;
                 }
                 Ok(None) => {
                     // Event parsed but not relevant (not a file access we care about)
+                    log::trace!("Event parsed but not an open event or not relevant");
                 }
                 Err(e) => {
-                    log::debug!("Failed to parse eslogger event: {} - {}", e, line);
+                    // Log parsing errors at higher level for first few events
+                    if event_count <= 10 {
+                        log::warn!("Failed to parse eslogger event #{}: {}", event_count, e);
+                    } else {
+                        log::debug!("Failed to parse eslogger event: {} - Event: {}", e, line);
+                    }
                 }
             }
         }
 
+        // Wait for child process and capture any remaining output
         let exit_status = child.wait().await?;
         if !exit_status.success() {
-            return Err(anyhow::anyhow!("eslogger exited with error: {}", exit_status));
+            log::error!("eslogger exited with non-zero status: {}", exit_status);
+            log::error!("Command was: {}", "eslogger open --format json");
+
+            // Collect any stderr messages to provide better error context
+            let mut stderr_messages = Vec::new();
+            while let Ok(msg) = stderr_rx.try_recv() {
+                stderr_messages.push(msg);
+            }
+
+            // Check for specific error conditions
+            let error_msg = if stderr_messages.iter().any(|m| m.contains("TCC Full Disk Access") || m.contains("ES_NEW_CLIENT_RESULT_ERR_NOT_PERMITTED")) {
+                log::error!("eslogger requires Full Disk Access permission in macOS System Preferences");
+                "eslogger requires Full Disk Access permission. Please:\n\
+                1. Open System Preferences -> Security & Privacy -> Privacy tab\n\
+                2. Select 'Full Disk Access' from the left sidebar\n\
+                3. Click the lock to make changes\n\
+                4. Add Terminal.app (or your terminal emulator) to the list\n\
+                5. Restart your terminal and try again"
+            } else if stderr_messages.iter().any(|m| m.contains("Not privileged") || m.contains("ES_NEW_CLIENT_RESULT_ERR_NOT_PRIVILEGED")) {
+                log::error!("eslogger needs to be run with root privileges");
+                "eslogger needs root privileges. Please run with: sudo {}"
+            } else {
+                log::error!("eslogger failed with unknown error");
+                "eslogger exited with error: {}. Command was: eslogger open --format json"
+            };
+
+            return Err(anyhow::anyhow!("{}", error_msg.replace("{}", &exit_status.to_string())));
         }
 
         Ok(())
     }
 
     fn check_eslogger_available(&self) -> bool {
-        Command::new("which")
+        // First check if eslogger exists
+        let exists = Command::new("which")
             .arg("eslogger")
             .output()
             .map(|output| output.status.success())
-            .unwrap_or(false)
+            .unwrap_or(false);
+
+        if exists {
+            log::debug!("eslogger found at /usr/bin/eslogger");
+        } else {
+            log::error!("eslogger not found in PATH");
+        }
+
+        exists
     }
 
-    fn parse_eslogger_event(&self, line: &str) -> Result<Option<(PathBuf, PathBuf)>> {
-        let event: EsloggerEvent = serde_json::from_str(line)?;
+    fn parse_eslogger_event(&self, line: &str) -> Result<Option<(PathBuf, PathBuf, Option<u32>)>> {
+        // Try to parse as generic JSON first to see structure
+        let json: serde_json::Value = serde_json::from_str(line)?;
 
-        // We only care about file access events
-        if event.event_info.event_type != "file_open" {
+        // Check if this is an open event (event_type == 10 means open)
+        let is_open = json.get("event_type")
+            .and_then(|t| t.as_u64())
+            .map(|t| t == 10)
+            .unwrap_or(false)
+            || json.get("event").and_then(|e| e.get("open")).is_some();
+
+        if !is_open {
+            log::trace!("Not an open event, skipping");
             return Ok(None);
         }
 
-        let process_path = event
-            .process_info
-            .executable_path
-            .as_ref()
+        // Check if this is a directory (st_mode & 0170000 == 0040000)
+        let is_directory = json.get("event")
+            .and_then(|e| e.get("open"))
+            .and_then(|o| o.get("file"))
+            .and_then(|f| f.get("stat"))
+            .and_then(|s| s.get("st_mode"))
+            .and_then(|m| m.as_u64())
+            .map(|mode| (mode & 0o170000) == 0o040000)
+            .unwrap_or(false);
+
+        if is_directory {
+            log::trace!("Skipping directory open");
+            return Ok(None);
+        }
+
+        // Extract process executable path - handle nested structure
+        let process_path = json.get("process")
+            .and_then(|p| p.get("executable"))
+            .and_then(|e| {
+                // The path is nested in an object
+                e.get("path").and_then(|p| p.as_str())
+            })
             .ok_or_else(|| anyhow::anyhow!("No process path in event"))?;
 
-        let file_path = event
-            .event_info
-            .file_info
-            .as_ref()
-            .and_then(|f| f.path.as_ref())
+        // Extract file path from the nested structure
+        let file_path = json.get("event")
+            .and_then(|e| e.get("open"))
+            .and_then(|o| o.get("file"))
+            .and_then(|f| f.get("path"))
+            .and_then(|p| p.as_str())
             .ok_or_else(|| anyhow::anyhow!("No file path in event"))?;
 
-        Ok(Some((PathBuf::from(process_path), PathBuf::from(file_path))))
+        // Extract PID from audit_token
+        let pid = json.get("process")
+            .and_then(|p| p.get("audit_token"))
+            .and_then(|t| t.get("pid"))
+            .and_then(|p| p.as_u64())
+            .map(|p| p as u32);
+
+        // Extract signing info if available
+        let signing_id = json.get("process")
+            .and_then(|p| p.get("signing_id"))
+            .and_then(|s| s.as_str());
+
+        if let Some(sid) = signing_id {
+            log::trace!("Process signing ID: {}", sid);
+        }
+
+        Ok(Some((
+            PathBuf::from(process_path),
+            PathBuf::from(file_path),
+            pid,
+        )))
     }
 
-    async fn handle_file_access(&mut self, process_path: &Path, file_path: &Path) -> Result<()> {
+    async fn handle_file_access_with_pid(
+        &mut self,
+        process_path: &Path,
+        file_path: &Path,
+        pid: Option<u32>,
+    ) -> Result<()> {
         // Resolve symlinks to get real paths
         let real_file_path = self.normalize_path(file_path);
         let real_process_path = self.normalize_path(process_path);
 
-        // Check if this file should be protected
-        if !self.rule_engine.is_protected_file(&real_file_path) {
+        // Get process name and code signing info
+        let process_name = real_process_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown");
+
+        let pid_str = pid.map_or(String::from("?"), |p| p.to_string());
+
+        // Get code signing info on macOS
+        #[cfg(target_os = "macos")]
+        let signer_info = self.get_code_signer(&real_process_path);
+        #[cfg(not(target_os = "macos"))]
+        let signer_info = String::new();
+
+        // Log ALL file opens, not just protected ones
+        let is_protected = self.rule_engine.is_protected_file(&real_file_path);
+
+        if !is_protected {
+            // Log non-protected file access at INFO level so it's visible
+            log::info!(
+                "{}[{}]{}: open {}: OK",
+                process_name,
+                pid_str,
+                signer_info,
+                real_file_path.display()
+            );
             return Ok(());
         }
 
-        log::debug!(
-            "File access detected: {} -> {}",
-            real_process_path.display(),
-            real_file_path.display()
-        );
+        // Protected file access detected - will check rules
 
         // Check if access is allowed
         let decision = self
@@ -191,8 +382,10 @@ impl Monitor {
         match decision {
             Decision::Allow => {
                 log::info!(
-                    "ALLOWED: {} -> {}",
-                    real_process_path.display(),
+                    "{}[{}]{}: open {}: OK",
+                    process_name,
+                    pid_str,
+                    signer_info,
                     real_file_path.display()
                 );
             }
@@ -200,23 +393,100 @@ impl Monitor {
                 match self.mode {
                     Mode::Monitor => {
                         log::warn!(
-                            "DETECTED: {} -> {}",
-                            real_process_path.display(),
+                            "{}[{}]{}: open {}: DETECTED (monitor mode)",
+                            process_name,
+                            pid_str,
+                            signer_info,
                             real_file_path.display()
                         );
                     }
                     Mode::Enforce => {
-                        log::error!(
-                            "BLOCKED: {} -> {}",
-                            real_process_path.display(),
-                            real_file_path.display()
-                        );
-                        // Note: With eslogger we can only log, not actually block
-                        // For real blocking, we'd need ESF
+                        // On macOS with eslogger, we can suspend the process
+                        #[cfg(target_os = "macos")]
+                        if let Some(pid) = pid {
+                            // Suspend the process
+                            if self.suspend_process(pid) {
+                                log::error!(
+                                    "{}[{}]{}: open {}: STOPPED",
+                                    process_name,
+                                    pid,
+                                    signer_info,
+                                    real_file_path.display()
+                                );
+                            } else {
+                                // Process likely exited already - still log the violation
+                                log::error!(
+                                    "{}[{}]{}: open {}: VIOLATION (process exited)",
+                                    process_name,
+                                    pid,
+                                    signer_info,
+                                    real_file_path.display()
+                                );
+                            }
+                        } else {
+                            log::error!(
+                                "{}[?]{}: open {}: BLOCKED (no PID)",
+                                process_name,
+                                signer_info,
+                                real_file_path.display()
+                            );
+                        }
+
+                        #[cfg(not(target_os = "macos"))]
+                        {
+                            log::error!(
+                                "{}[{}]: open {}: BLOCKED",
+                                process_name,
+                                pid_str,
+                                real_file_path.display()
+                            );
+                        }
                     }
                     Mode::Interactive => {
-                        self.handle_interactive_prompt(&real_process_path, &real_file_path)
+                        // Suspend process while waiting for user decision
+                        #[cfg(target_os = "macos")]
+                        if let Some(pid) = pid {
+                            if self.suspend_process(pid) {
+                                log::warn!(
+                                    "{}[{}]{}: open {}: SUSPENDED (waiting for user)",
+                                    process_name,
+                                    pid,
+                                    signer_info,
+                                    real_file_path.display()
+                                );
+                            }
+                        }
+
+                        let allow = self
+                            .handle_interactive_prompt_with_pid(
+                                &real_process_path,
+                                &real_file_path,
+                                pid,
+                            )
                             .await?;
+
+                        // Resume or terminate based on decision
+                        #[cfg(target_os = "macos")]
+                        if let Some(pid) = pid {
+                            if allow {
+                                self.resume_process(pid);
+                                log::info!(
+                                    "{}[{}]{}: open {}: RESUMED (user allowed)",
+                                    process_name,
+                                    pid,
+                                    signer_info,
+                                    real_file_path.display()
+                                );
+                            } else {
+                                log::error!(
+                                    "{}[{}]{}: open {}: STOPPED (user denied)",
+                                    process_name,
+                                    pid,
+                                    signer_info,
+                                    real_file_path.display()
+                                );
+                            }
+                        }
                     }
                 }
             }
@@ -244,11 +514,85 @@ impl Monitor {
         }
     }
 
-    async fn handle_interactive_prompt(
+    #[cfg(target_os = "macos")]
+    fn suspend_process(&self, pid: u32) -> bool {
+        use std::process::Command;
+
+        // First check if process exists
+        match Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .output()
+        {
+            Ok(check_output) => {
+                if !check_output.status.success() {
+                    log::debug!("Process PID {} no longer exists (already exited)", pid);
+                    return false;
+                }
+            }
+            Err(e) => {
+                log::error!("Failed to check process existence: {}", e);
+                return false;
+            }
+        }
+
+        // Now try to suspend it
+        match Command::new("kill")
+            .args(["-STOP", &pid.to_string()])
+            .output()
+        {
+            Ok(output) => {
+                if output.status.success() {
+                    log::debug!("Successfully suspended process PID {}", pid);
+                    true
+                } else {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    if stderr.contains("No such process") {
+                        log::debug!("Process PID {} exited before we could suspend it", pid);
+                    } else if stderr.contains("Operation not permitted") {
+                        log::error!("Permission denied suspending PID {} (may be protected)", pid);
+                    } else {
+                        log::error!("Failed to suspend PID {}: {}", pid, stderr.trim());
+                    }
+                    false
+                }
+            }
+            Err(e) => {
+                log::error!("Failed to run kill command: {}", e);
+                false
+            }
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn resume_process(&self, pid: u32) -> bool {
+        use std::process::Command;
+
+        match Command::new("kill")
+            .args(["-CONT", &pid.to_string()])
+            .output()
+        {
+            Ok(output) => {
+                if output.status.success() {
+                    log::debug!("Successfully resumed process PID {}", pid);
+                    true
+                } else {
+                    log::error!("Failed to resume process PID {}: {:?}", pid, output);
+                    false
+                }
+            }
+            Err(e) => {
+                log::error!("Failed to run kill command: {}", e);
+                false
+            }
+        }
+    }
+
+    async fn handle_interactive_prompt_with_pid(
         &mut self,
         process_path: &Path,
         file_path: &Path,
-    ) -> Result<()> {
+        pid: Option<u32>,
+    ) -> Result<bool> {
         loop {
             let app_name = process_path
                 .file_name()
@@ -260,6 +604,11 @@ impl Monitor {
             println!("{}", "=".repeat(60));
             println!("Application: {}", app_name);
             println!("Full path:   {}", process_path.display());
+            if let Some(pid) = pid {
+                println!("Process ID:  {}", pid);
+                #[cfg(target_os = "macos")]
+                println!("Status:      SUSPENDED (waiting for decision)");
+            }
             println!("Credential:  {}", file_path.display());
             println!();
             println!("This application is trying to access sensitive credentials.");
@@ -281,29 +630,36 @@ impl Monitor {
             match input.trim().to_lowercase().chars().next() {
                 Some('a') => {
                     println!("✓ Allowed once\n");
-                    log::info!("User allowed access: {} -> {}", app_name, file_path.display());
-                    return Ok(());
+                    log::info!(
+                        "User allowed access: {} -> {}",
+                        app_name,
+                        file_path.display()
+                    );
+                    return Ok(true);
                 }
                 Some('w') => {
                     println!("✓ Added to whitelist\n");
                     self.rule_engine
                         .add_runtime_exception(process_path.to_path_buf(), file_path.to_path_buf());
-                    log::info!(
-                        "User whitelisted: {} -> {}",
-                        app_name,
-                        file_path.display()
-                    );
-                    return Ok(());
+                    log::info!("User whitelisted: {} -> {}", app_name, file_path.display());
+                    return Ok(true);
                 }
                 Some('s') => {
                     self.show_process_info(process_path);
+                    if let Some(pid) = pid {
+                        self.show_process_status(pid);
+                    }
                     // Continue the loop to re-prompt
                     continue;
                 }
                 _ => {
                     println!("✗ Denied\n");
-                    log::warn!("User denied access: {} -> {}", app_name, file_path.display());
-                    return Ok(());
+                    log::warn!(
+                        "User denied access: {} -> {}",
+                        app_name,
+                        file_path.display()
+                    );
+                    return Ok(false);
                 }
             }
         }
@@ -317,7 +673,8 @@ impl Monitor {
         if let Ok(metadata) = std::fs::metadata(process_path) {
             if let Ok(modified) = metadata.modified() {
                 if let Ok(system_time) = modified.duration_since(std::time::UNIX_EPOCH) {
-                    let datetime = chrono::DateTime::from_timestamp(system_time.as_secs() as i64, 0);
+                    let datetime =
+                        chrono::DateTime::from_timestamp(system_time.as_secs() as i64, 0);
                     if let Some(dt) = datetime {
                         println!("  Modified: {}", dt.format("%Y-%m-%d %H:%M:%S"));
                     }
@@ -329,7 +686,7 @@ impl Monitor {
         {
             // Try to get code signature info on macOS
             if let Ok(output) = Command::new("codesign")
-                .args(&["-dvvv", process_path.to_str().unwrap_or("")])
+                .args(["-dvvv", process_path.to_str().unwrap_or("")])
                 .output()
             {
                 if output.status.success() {
@@ -348,6 +705,26 @@ impl Monitor {
         }
     }
 
+    fn show_process_status(&self, pid: u32) {
+        #[cfg(target_os = "macos")]
+        {
+            println!("  Process Status:");
+            if let Ok(output) = Command::new("ps")
+                .args(["-p", &pid.to_string(), "-o", "state="])
+                .output()
+            {
+                let state = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                match state.chars().next() {
+                    Some('T') => println!("    State: Suspended (SIGSTOP)"),
+                    Some('R') => println!("    State: Running"),
+                    Some('S') => println!("    State: Sleeping"),
+                    Some('Z') => println!("    State: Zombie"),
+                    _ => println!("    State: {}", state),
+                }
+            }
+        }
+    }
+
     #[cfg(target_os = "macos")]
     async fn monitor_with_esf(&mut self) -> Result<()> {
         Err(anyhow::anyhow!(
@@ -357,9 +734,11 @@ impl Monitor {
 
     #[cfg(target_os = "linux")]
     async fn monitor_with_fanotify(&mut self) -> Result<()> {
-        Err(anyhow::anyhow!(
-            "fanotify monitoring not yet implemented. Use --mechanism auto for now."
-        ))
+        log::info!("Using fanotify mechanism");
+
+        // Use the Linux-specific monitor implementation
+        let mut linux_monitor = LinuxMonitor::new(self.mode.clone());
+        linux_monitor.start().await
     }
 
     #[cfg(target_os = "linux")]
@@ -390,5 +769,33 @@ impl Monitor {
                 "No monitoring mechanism available for this platform"
             ))
         }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn get_code_signer(&self, path: &Path) -> String {
+        // Try to get code signature info
+        if let Ok(output) = Command::new("codesign")
+            .args(["-dvvv", path.to_str().unwrap_or("")])
+            .output()
+        {
+            if output.status.success() {
+                let info = String::from_utf8_lossy(&output.stderr);
+                // Look for the first Authority= line which shows the signer
+                for line in info.lines() {
+                    if line.contains("Authority=") {
+                        let signer = line.trim()
+                            .strip_prefix("Authority=")
+                            .unwrap_or(line.trim())
+                            .to_string();
+                        // Return formatted signer info
+                        return format!(" [{}]", signer);
+                    }
+                }
+                // Signed but couldn't extract signer
+                return " [Signed]".to_string();
+            }
+        }
+        // Not signed or couldn't check
+        String::new()
     }
 }
