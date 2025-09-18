@@ -3,14 +3,9 @@ use crate::cli::Mode;
 use crate::config::Config;
 use crate::rules::{Decision, RuleEngine};
 use anyhow::Result;
-use nix::errno::Errno;
 use nix::libc;
 use std::collections::HashMap;
-use std::ffi::CStr;
-use std::fs::File;
-use std::io::{self, Read};
 use std::mem;
-use std::os::unix::io::{AsRawFd, FromRawFd};
 use std::path::{Path, PathBuf};
 
 // Fanotify constants not in nix crate
@@ -199,7 +194,7 @@ impl LinuxMonitor {
 
         // Get home directory for current users
         // TODO: Periodically refresh watches to detect newly created secret files
-        let mut credential_paths = self.get_credential_paths();
+        let credential_paths = self.get_credential_paths();
 
         log::info!(
             "Found {} credential paths to monitor",
@@ -319,8 +314,21 @@ impl LinuxMonitor {
             file_path.display()
         );
 
-        // Check if access is allowed
-        let decision = self.rule_engine.check_access(&process_path, &file_path, None);
+        // Create process context for the new rule system
+        use crate::process_context::ProcessContext;
+        let context = ProcessContext {
+            path: process_path.clone(),
+            pid: Some(metadata.pid),
+            ppid: None, // TODO: Get parent PID on Linux
+            team_id: None, // Not available on Linux
+            app_id: None,  // Not available on Linux
+            args: None,    // TODO: Get command-line args on Linux
+            uid: None,     // TODO: Get user ID on Linux
+            euid: None,    // TODO: Get effective user ID on Linux
+        };
+
+        // Check if access is allowed using new context-aware method
+        let decision = self.rule_engine.check_access_with_context(&context, &file_path);
 
         match decision {
             Decision::Allow => {

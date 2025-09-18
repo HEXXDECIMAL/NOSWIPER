@@ -8,6 +8,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncBufReadExt, BufReader};
+
+#[cfg(target_os = "macos")]
 use tokio::process::Command as TokioCommand;
 
 #[cfg(target_os = "linux")]
@@ -551,16 +553,7 @@ impl Monitor {
         let real_process_path = self.normalize_path(process_path);
         let real_protected_path = self.normalize_path(protected_path);
 
-        // Get code signing info
-        let pid_str = match (euid, pid) {
-            (Some(e), Some(p)) => format!("{}@{}", e, p),
-            (None, Some(p)) => p.to_string(),
-            _ => String::from("?")
-        };
-        let ppid_str = match ppid {
-            Some(p) => p.to_string(),
-            None => String::from("?")
-        };
+        // Get code signing info (no longer need PID strings for simplified logs)
 
         let signer_info = signing_info
             .as_ref()
@@ -587,57 +580,46 @@ impl Monitor {
 
         match decision {
             Decision::Allow => {
-                // Build log message with process tree
-                let mut log_msg = format!(
-                    "{}[{}/ppid:{}]{}: exec with {}: OK (allowed)",
-                    real_process_path.display(),
-                    pid_str,
-                    ppid_str,
-                    signer_info,
+                // Simplified log for allowed exec
+                let mut log_msg = format!("OK: {} exec with {}",
+                    real_process_path.file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("unknown"),
                     real_protected_path.display()
                 );
 
-                // Add command line
+                // Add compact 2-level process tree
                 let args_str = args.join(" ");
-                log_msg.push_str(&format!("\n  Args: {}", args_str));
-
-                // Add process tree for better context
-                log_msg.push_str("\n\nProcess Tree (5 levels):\n");
-                let process_name = real_process_path.file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("unknown");
-
-                log_msg.push_str(&self.build_process_tree_from_cache(
-                    pid, ppid, euid, process_name, &args_str, 5
-                ));
+                log_msg.push_str(&format!("\n{}", self.build_process_tree_from_cache(
+                    pid, ppid, euid,
+                    real_process_path.file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("unknown"),
+                    &args_str, 2
+                )));
 
                 log::info!("{}", log_msg);
             }
             Decision::Deny => {
                 match self.mode {
                     Mode::Monitor => {
-                        // Build log message
-                        let mut log_msg = format!(
-                            "{}[{}->{}]{}: exec with {}: DETECTED (monitor mode)",
-                            real_process_path.display(),
-                            pid_str,
-                            ppid_str,
-                            signer_info,
+                        // Simplified header for exec violations
+                        let mut log_msg = format!("DETECTED: {} exec with {}",
+                            real_process_path.file_name()
+                                .and_then(|n| n.to_str())
+                                .unwrap_or("unknown"),
                             real_protected_path.display()
                         );
 
-                        // Add command line
+                        // Add detailed 5-level process tree for violations
                         let args_str = args.join(" ");
-                        log_msg.push_str(&format!("\n  Args: {}", args_str));
-
-                        // Add process tree using cache
-                        log_msg.push_str("\n\nProcess Tree (5 levels):\n");
-                        let process_name = real_process_path.file_name()
-                            .and_then(|n| n.to_str())
-                            .unwrap_or("unknown");
-                        log_msg.push_str(&self.build_process_tree_from_cache(
-                            pid, ppid, euid, process_name, &args_str, 5
-                        ));
+                        log_msg.push_str(&format!("\n{}", self.build_process_tree_from_cache(
+                            pid, ppid, euid,
+                            real_process_path.file_name()
+                                .and_then(|n| n.to_str())
+                                .unwrap_or("unknown"),
+                            &args_str, 5
+                        )));
 
                         log::warn!("{}", log_msg);
                     }
@@ -758,7 +740,7 @@ impl Monitor {
                             }
                         }
 
-                        let allow = self
+                        let _allow = self
                             .handle_interactive_prompt_with_pid(
                                 &real_process_path,
                                 &real_protected_path,
@@ -768,7 +750,7 @@ impl Monitor {
 
                         #[cfg(target_os = "macos")]
                         if let Some(pid) = pid {
-                            if allow {
+                            if _allow {
                                 self.resume_process(pid);
                                 log::info!(
                                     "{}[{}]{}: exec with {}: RESUMED (user allowed)",
@@ -808,10 +790,7 @@ impl Monitor {
         let real_file_path = self.normalize_path(file_path);
         let real_process_path = self.normalize_path(process_path);
 
-        // Get code signing info
-
-        let pid_str = pid.map_or(String::from("?"), |p| p.to_string());
-        let ppid_str = ppid.map_or(String::from("?"), |p| p.to_string());
+        // Get code signing info (no longer need PID strings for simplified logs)
 
         // Use signing info from eslogger - NEVER access the binary!
         let signer_info = signing_info
@@ -826,11 +805,10 @@ impl Monitor {
             // Log non-protected file access only in verbose mode
             if self.verbose {
                 log::info!(
-                    "{}[{}/ppid:{}]{}: open {}: OK (not monitored)",
-                    real_process_path.display(),
-                    pid_str,
-                    ppid_str,
-                    signer_info,
+                    "OK: {} -> {} (not monitored)",
+                    real_process_path.file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("unknown"),
                     real_file_path.display()
                 );
             }
@@ -860,23 +838,19 @@ impl Monitor {
 
         match decision {
             Decision::Allow => {
-                // Build log message with process tree
-                let mut log_msg = format!(
-                    "{}[{}/ppid:{}]{}: open {}: OK (allowed)",
-                    real_process_path.display(),
-                    pid_str,
-                    ppid_str,
-                    signer_info,
+                // Simplified log for allowed access - just show process->parent
+                let mut log_msg = format!("OK: {} -> {}",
+                    real_process_path.file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("unknown"),
                     real_file_path.display()
                 );
 
-                // Add process tree for better context
-                log_msg.push_str("\n\nProcess Tree (5 levels):\n");
+                // Add compact 2-level process tree
                 let process_name = real_process_path.file_name()
                     .and_then(|n| n.to_str())
                     .unwrap_or("unknown");
 
-                // Try to get command line for current process if available
                 let cmdline = if let Some(p) = pid {
                     self.get_process_cmdline(p)
                 } else {
@@ -884,9 +858,9 @@ impl Monitor {
                 };
                 let args_str = cmdline.as_deref().unwrap_or("");
 
-                log_msg.push_str(&self.build_process_tree_from_cache(
-                    pid, ppid, euid, process_name, args_str, 5
-                ));
+                log_msg.push_str(&format!("\n{}", self.build_process_tree_from_cache(
+                    pid, ppid, euid, process_name, args_str, 2
+                )));
 
                 log::info!("{}", log_msg);
             }
@@ -902,31 +876,28 @@ impl Monitor {
 
                         // Process tree will show parent info
 
-                        // Build log message
-                        let mut log_msg = format!(
-                            "{}[{}->{}]{}: open {}: DETECTED (monitor mode)",
-                            real_process_path.display(),
-                            pid_str,
-                            ppid_str,
-                            signer_info,
+                        // Simplified header for violations
+                        let mut log_msg = format!("DETECTED: {} -> {}",
+                            real_process_path.file_name()
+                                .and_then(|n| n.to_str())
+                                .unwrap_or("unknown"),
                             real_file_path.display()
                         );
 
                         let args_str = if let Some(ref cmdline) = cmdline {
-                            log_msg.push_str(&format!("\n  Args: {}", cmdline));
                             cmdline.as_str()
                         } else {
                             ""
                         };
 
-                        // Add process tree using cache
-                        log_msg.push_str("\n\nProcess Tree (5 levels):\n");
-                        let process_name = real_process_path.file_name()
-                            .and_then(|n| n.to_str())
-                            .unwrap_or("unknown");
-                        log_msg.push_str(&self.build_process_tree_from_cache(
-                            pid, ppid, euid, process_name, args_str, 5
-                        ));
+                        // Add detailed 5-level process tree for violations
+                        log_msg.push_str(&format!("\n{}", self.build_process_tree_from_cache(
+                            pid, ppid, euid,
+                            real_process_path.file_name()
+                                .and_then(|n| n.to_str())
+                                .unwrap_or("unknown"),
+                            args_str, 5
+                        )));
 
                         log::warn!("{}", log_msg);
                     }
@@ -1057,10 +1028,10 @@ impl Monitor {
                         #[cfg(not(target_os = "macos"))]
                         {
                             log::error!(
-                                "{}[{}->{}]: open {}: BLOCKED",
-                                real_process_path.display(),
-                                pid_str,
-                                ppid_str,
+                                "BLOCKED: {} -> {}",
+                                real_process_path.file_name()
+                                    .and_then(|n| n.to_str())
+                                    .unwrap_or("unknown"),
                                 real_file_path.display()
                             );
                         }
@@ -1080,7 +1051,7 @@ impl Monitor {
                             }
                         }
 
-                        let allow = self
+                        let _allow = self
                             .handle_interactive_prompt_with_pid(
                                 &real_process_path,
                                 &real_file_path,
@@ -1091,7 +1062,7 @@ impl Monitor {
                         // Resume or terminate based on decision
                         #[cfg(target_os = "macos")]
                         if let Some(pid) = pid {
-                            if allow {
+                            if _allow {
                                 self.resume_process(pid);
                                 log::info!(
                                     "{}[{}]{}: open {}: RESUMED (user allowed)",

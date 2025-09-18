@@ -61,7 +61,7 @@ protected_files:
       - "~/.ssh/id_*"
       - "~/.ssh/*_key"
     allow:
-      # SSH tools from system paths only
+      # SSH tools from system paths and Homebrew
       - base: "ssh"
         euid: 501-599  # Regular user accounts on macOS
       - base: "ssh-add"
@@ -777,7 +777,9 @@ default_base_paths:
   - /opt/homebrew/bin
   - /opt/homebrew/sbin
   - /opt/homebrew/Cellar/*/bin
+  - /opt/homebrew/Cellar/*/*/bin
   - /opt/homebrew/Cellar/*/sbin
+  - /opt/homebrew/Cellar/*/*/sbin
   - /nix/store/*/bin  # Nix packages
   - /run/current-system/sw/bin  # NixOS system packages
   - ~/.nix-profile/bin  # User nix packages
