@@ -349,10 +349,6 @@ impl LinuxMonitor {
 
     fn init_fanotify(&mut self) -> Result<()> {
         // Initialize fanotify with permission events
-        // Note: FAN_UNLIMITED_QUEUE and FAN_UNLIMITED_MARKS are not defined, using values
-        const FAN_UNLIMITED_QUEUE: u32 = 0x00000010;
-        const FAN_UNLIMITED_MARKS: u32 = 0x00000020;
-
         let flags = FAN_CLASS_PRE_CONTENT | FAN_CLOEXEC | FAN_UNLIMITED_QUEUE | FAN_UNLIMITED_MARKS;
         let event_f_flags = libc::O_RDONLY | libc::O_LARGEFILE;
 
