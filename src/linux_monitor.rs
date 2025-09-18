@@ -592,8 +592,17 @@ impl LinuxMonitor {
                     break;
                 }
 
-                // Handle the event
-                self.handle_event(metadata).await?;
+                log::debug!("Event metadata: fd={}, pid={}, mask=0x{:x}, event_len={}",
+                    metadata.fd, metadata.pid, metadata.mask, metadata.event_len);
+
+                // Handle the event - don't propagate errors, just log them
+                if let Err(e) = self.handle_event(metadata).await {
+                    log::error!("Error handling event: {}", e);
+                    // Try to close the fd if we have one
+                    if metadata.fd >= 0 {
+                        unsafe { libc::close(metadata.fd) };
+                    }
+                }
 
                 offset += metadata.event_len as usize;
             }
@@ -601,7 +610,15 @@ impl LinuxMonitor {
     }
 
     async fn handle_event(&mut self, metadata: &FanotifyEventMetadata) -> Result<()> {
-        log::info!("Handling fanotify event for PID {} (mask: 0x{:x})", metadata.pid, metadata.mask);
+        log::info!("Handling fanotify event for PID {} (mask: 0x{:x}, fd={})",
+            metadata.pid, metadata.mask, metadata.fd);
+
+        // Sanity check - event fd should not be the same as fanotify fd
+        if let Some(fanotify_fd) = self.fanotify_fd {
+            if metadata.fd == fanotify_fd {
+                log::error!("BUG: Event fd {} is same as fanotify fd!", metadata.fd);
+            }
+        }
 
         // Get the file path from the file descriptor
         let file_path = self.get_path_from_fd(metadata.fd)?;
