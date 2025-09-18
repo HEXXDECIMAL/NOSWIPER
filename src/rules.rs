@@ -30,7 +30,7 @@ const CACHE_TTL: Duration = Duration::from_secs(300);
 #[derive(Clone)]
 pub struct RuleEngine {
     // Configuration loaded from YAML
-    config: Config,
+    pub config: Config,
     // Runtime exceptions (process_path, file_path) -> expires_at
     runtime_exceptions: HashMap<(PathBuf, PathBuf), Option<Instant>>,
 }
@@ -43,11 +43,22 @@ impl RuleEngine {
         }
     }
 
-    /// Get home directory for a UID with caching
+    /// Gets the home directory for a UID with caching.
+    ///
+    /// This function maintains an internal cache of UID to home directory mappings
+    /// to avoid repeated system calls. Cache entries are automatically expired
+    /// after 5 minutes to handle user changes.
     fn get_cached_home_dir(uid: u32) -> Option<PathBuf> {
         // First try to get from cache with read lock
         {
-            let cache = UID_HOME_CACHE.read().unwrap();
+            let cache = UID_HOME_CACHE
+                .read()
+                .map_err(|e| {
+                    log::warn!("Failed to acquire read lock on UID cache: {}", e);
+                    e
+                })
+                .ok()?;
+
             if let Some(entry) = cache.get(&uid) {
                 let age = Instant::now().duration_since(entry.cached_at);
                 if age < CACHE_TTL {
@@ -60,7 +71,13 @@ impl RuleEngine {
         let home_dir = crate::process_context::get_home_for_uid(uid);
 
         // Update cache with write lock
-        let mut cache = UID_HOME_CACHE.write().unwrap();
+        let mut cache = UID_HOME_CACHE
+            .write()
+            .map_err(|e| {
+                log::error!("Failed to acquire write lock on UID cache: {}", e);
+                e
+            })
+            .ok()?;
         cache.insert(
             uid,
             HomeDirCacheEntry {

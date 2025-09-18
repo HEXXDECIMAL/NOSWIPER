@@ -1,5 +1,56 @@
+//! Configuration management for NoSwiper credential protection.
+//!
+//! This module handles loading and validating configuration from embedded YAML files
+//! or user-provided configuration files. The configuration defines which files to
+//! protect and which processes are allowed to access them.
+
 use crate::allow_rule::AllowRule;
 use serde::{Deserialize, Serialize};
+use std::error::Error as StdError;
+use std::fmt;
+
+/// Errors that can occur during configuration loading and validation.
+#[derive(Debug)]
+pub enum ConfigError {
+    /// Invalid YAML syntax in configuration file
+    YamlParse(serde_yaml::Error),
+    /// File system error reading configuration
+    Io(std::io::Error),
+    /// Configuration validation failed
+    Validation(String),
+}
+
+impl fmt::Display for ConfigError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ConfigError::YamlParse(err) => write!(f, "YAML parsing error: {}", err),
+            ConfigError::Io(err) => write!(f, "I/O error: {}", err),
+            ConfigError::Validation(msg) => write!(f, "Configuration validation error: {}", msg),
+        }
+    }
+}
+
+impl StdError for ConfigError {
+    fn source(&self) -> Option<&(dyn StdError + 'static)> {
+        match self {
+            ConfigError::YamlParse(err) => Some(err),
+            ConfigError::Io(err) => Some(err),
+            ConfigError::Validation(_) => None,
+        }
+    }
+}
+
+impl From<serde_yaml::Error> for ConfigError {
+    fn from(err: serde_yaml::Error) -> Self {
+        ConfigError::YamlParse(err)
+    }
+}
+
+impl From<std::io::Error> for ConfigError {
+    fn from(err: std::io::Error) -> Self {
+        ConfigError::Io(err)
+    }
+}
 
 // Embed the OS-specific configurations at compile time
 #[cfg(target_os = "macos")]
@@ -70,29 +121,55 @@ pub struct MonitoringConfig {
 }
 
 impl Config {
-    /// Load the default embedded configuration
-    pub fn default() -> Result<Self, serde_yaml::Error> {
+    /// Loads the default embedded configuration.
+    ///
+    /// This configuration is embedded at compile time and tailored to the
+    /// target operating system. It includes sensible defaults for common
+    /// credential files and trusted applications.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`ConfigError`] if the embedded configuration is malformed
+    /// or fails validation.
+    pub fn default() -> Result<Self, ConfigError> {
         let config: Config = serde_yaml::from_str(DEFAULT_CONFIG_YAML)?;
         config.validate_global_exclusions()?;
         Ok(config)
     }
 
-    /// Load configuration from a file, merging with defaults
-    #[allow(dead_code)] // Will be used for user overrides
-    pub fn from_file(path: &std::path::Path) -> Result<Self, Box<dyn std::error::Error>> {
+    /// Loads configuration from a file.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - Path to the YAML configuration file
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`ConfigError`] if:
+    /// - The file cannot be read
+    /// - The YAML is malformed
+    /// - The configuration fails validation
+    ///
+    /// # Note
+    ///
+    /// Currently returns the user configuration as-is. Future versions
+    /// will merge with defaults for a better user experience.
+    #[allow(dead_code)] // Will be used for user configuration overrides
+    pub fn from_file(path: &std::path::Path) -> Result<Self, ConfigError> {
         let contents = std::fs::read_to_string(path)?;
         let user_config: Config = serde_yaml::from_str(&contents)?;
-        user_config
-            .validate_global_exclusions()
-            .map_err(|e| format!("Configuration validation failed: {}", e))?;
+        user_config.validate_global_exclusions()?;
 
         // For now, just return the user config
         // TODO: Implement proper merging with defaults
         Ok(user_config)
     }
 
-    /// Validate that all global exclusions have either path_pattern or team_id
-    fn validate_global_exclusions(&self) -> Result<(), serde_yaml::Error> {
+    /// Validates that all global exclusions have either path_pattern or team_id.
+    ///
+    /// This is a security requirement to prevent overly broad global exclusions
+    /// that could allow unauthorized access to protected files.
+    fn validate_global_exclusions(&self) -> Result<(), ConfigError> {
         for (i, rule) in self.global_exclusions.iter().enumerate() {
             if rule.path_pattern.is_none() && rule.team_id.is_none() {
                 let msg = format!(
@@ -100,22 +177,39 @@ impl Config {
                      Every global exclusion must have at least one of these for security.",
                     i + 1
                 );
-                return Err(serde::de::Error::custom(msg));
+                return Err(ConfigError::Validation(msg));
             }
         }
         Ok(())
     }
 
-    /// Check if a file matches a pattern (with glob support)
+    /// Checks if a file path matches a glob pattern.
+    ///
+    /// This method supports shell-style glob patterns and automatically
+    /// expands `~` to the user's home directory in both patterns and paths.
+    ///
+    /// # Arguments
+    ///
+    /// * `pattern` - The glob pattern to match against
+    /// * `file_path` - The file path to test
+    ///
+    /// # Returns
+    ///
+    /// `true` if the file path matches the pattern, `false` otherwise.
+    /// Invalid patterns are treated as non-matching.
     fn matches_pattern(&self, pattern: &str, file_path: &str) -> bool {
         // Expand ~ to home directory
         let expanded_pattern = shellexpand::tilde(pattern);
         let expanded_path = shellexpand::tilde(file_path);
 
-        // Use glob matching
-        glob::Pattern::new(&expanded_pattern)
-            .map(|p| p.matches(&expanded_path))
-            .unwrap_or(false)
+        // Use glob matching with proper error handling
+        match glob::Pattern::new(&expanded_pattern) {
+            Ok(pattern) => pattern.matches(&expanded_path),
+            Err(e) => {
+                log::warn!("Invalid glob pattern '{}': {}", pattern, e);
+                false
+            }
+        }
     }
 
     /// Check if a path is in the default basename paths

@@ -239,11 +239,21 @@ mod tests {
         // Test that default config loads from embedded YAML
         use crate::config::Config;
         let config = Config::default();
-        assert!(config.is_ok());
+        assert!(
+            config.is_ok(),
+            "Failed to load default config: {:?}",
+            config.err()
+        );
 
-        let config = config.unwrap();
+        let config = config.expect("Default config should load successfully");
         // Verify some expected entries exist
-        assert!(!config.protected_files.is_empty());
-        assert!(!config.excluded_patterns.is_empty());
+        assert!(
+            !config.protected_files.is_empty(),
+            "Protected files should not be empty"
+        );
+        assert!(
+            !config.excluded_patterns.is_empty(),
+            "Excluded patterns should not be empty"
+        );
     }
 }

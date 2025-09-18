@@ -1,8 +1,25 @@
+//! Process allow rules for fine-grained access control.
+//!
+//! This module defines the [`AllowRule`] type which specifies conditions under which
+//! a process is allowed to access protected files. Rules use AND logic, meaning all
+//! specified conditions must match for the rule to apply.
+
 use crate::config::Config;
 use crate::process_context::ProcessContext;
 use serde::{Deserialize, Deserializer, Serialize};
 
-/// A single allow rule with AND logic between conditions
+/// A single allow rule with AND logic between conditions.
+///
+/// This structure defines the criteria that a process must meet to be granted
+/// access to protected files. All specified fields must match for the rule
+/// to apply (AND logic).
+///
+/// # Security Considerations
+///
+/// - `team_id` is the most secure field as it cannot be spoofed on macOS
+/// - `app_id` can be set by developers and is less reliable
+/// - `path_pattern` should be as specific as possible to avoid false positives
+/// - When possible, combine multiple criteria for stronger validation
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AllowRule {
     /// Process basename (e.g., "firefox", "chrome")
@@ -214,9 +231,30 @@ impl AllowRule {
     }
 }
 
-/// Simple glob-like pattern matching
-#[allow(dead_code)] // Will be used when monitor is updated
-fn matches_pattern(pattern: &str, text: &str) -> bool {
+/// Performs simple glob-like pattern matching.
+///
+/// This function implements basic wildcard matching where `*` matches any
+/// sequence of characters. The implementation is optimized for the common
+/// patterns used in process and path matching.
+///
+/// # Arguments
+///
+/// * `pattern` - The pattern string, may contain `*` wildcards
+/// * `text` - The text to match against the pattern
+///
+/// # Returns
+///
+/// `true` if the text matches the pattern, `false` otherwise.
+///
+/// # Examples
+///
+/// ```
+/// # use noswiper::allow_rule::matches_pattern;
+/// assert!(matches_pattern("*.app", "Firefox.app"));
+/// assert!(matches_pattern("docker-credential-*", "docker-credential-desktop"));
+/// assert!(!matches_pattern("firefox", "chrome"));
+/// ```
+pub fn matches_pattern(pattern: &str, text: &str) -> bool {
     // Handle wildcards
     if pattern.contains('*') {
         // Convert pattern to regex-like matching

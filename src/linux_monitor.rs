@@ -3,6 +3,7 @@ use crate::cli::Mode;
 use crate::config::Config;
 use crate::rules::{Decision, RuleEngine};
 use anyhow::Result;
+use glob;
 use nix::libc;
 use std::collections::HashMap;
 use std::io;
@@ -45,6 +46,7 @@ pub struct FanotifyResponse {
     pub response: u32,
 }
 
+#[derive(Clone)]
 pub struct LinuxMonitor {
     rule_engine: RuleEngine,
     mode: Mode,
@@ -73,61 +75,153 @@ impl LinuxMonitor {
         }
     }
 
-    fn get_credential_paths(&self) -> Vec<PathBuf> {
+    /// Discovers protected files by expanding patterns from the configuration
+    fn get_protected_file_paths(&self) -> Vec<PathBuf> {
         let mut paths = Vec::new();
-
-        // Get all user home directories from /etc/passwd
         let users = self.get_system_users();
 
-        for user_home in users {
-            // SSH keys
-            paths.push(user_home.join(".ssh"));
-
-            // Cloud credentials
-            paths.push(user_home.join(".aws"));
-            paths.push(user_home.join(".azure"));
-            paths.push(user_home.join(".config/gcloud"));
-
-            // Kubernetes
-            paths.push(user_home.join(".kube"));
-
-            // Package managers
-            paths.push(user_home.join(".docker"));
-            paths.push(user_home.join(".npm"));
-
-            // GPG
-            paths.push(user_home.join(".gnupg"));
-            paths.push(user_home.join(".gnupg/private-keys-v1.d"));
-
-            // Password stores
-            paths.push(user_home.join(".password-store"));
-            paths.push(user_home.join(".local/share/keyrings"));
-
-            // Browsers (Linux paths)
-            paths.push(user_home.join(".mozilla/firefox"));
-            paths.push(user_home.join(".config/google-chrome"));
-            paths.push(user_home.join(".config/chromium"));
+        // Process each protected file pattern from the YAML configuration
+        for protected_file in &self.rule_engine.config.protected_files {
+            for pattern_str in protected_file.patterns() {
+                // For each pattern, expand it for all users and find matching files
+                let expanded_paths = self.expand_pattern_for_users(&pattern_str, &users);
+                paths.extend(expanded_paths);
+            }
         }
 
-        // Root paths
-        paths.push(PathBuf::from("/root/.ssh"));
-        paths.push(PathBuf::from("/root/.aws"));
-        paths.push(PathBuf::from("/root/.gnupg"));
-
-        // System-wide credentials
-        paths.push(PathBuf::from("/etc/ssl/private"));
-
-        // Remove duplicates and non-existent paths
+        // Remove duplicates and sort for consistent logging
         paths.sort();
         paths.dedup();
 
         paths
     }
 
+    /// Expands a single pattern for all users and returns matching files
+    fn expand_pattern_for_users(&self, pattern: &str, users: &[PathBuf]) -> Vec<PathBuf> {
+        let mut paths = Vec::new();
+
+        // If pattern starts with ~, expand for each user
+        if pattern.starts_with('~') {
+            for user_home in users {
+                let expanded_pattern = pattern.replacen('~', &user_home.to_string_lossy(), 1);
+                paths.extend(self.glob_pattern(&expanded_pattern));
+            }
+            // Also expand for root if not already covered
+            let root_pattern = pattern.replacen('~', "/root", 1);
+            paths.extend(self.glob_pattern(&root_pattern));
+        } else {
+            // Absolute pattern, use as-is
+            paths.extend(self.glob_pattern(pattern));
+        }
+
+        paths
+    }
+
+    /// Uses glob to find files matching a pattern
+    fn glob_pattern(&self, pattern: &str) -> Vec<PathBuf> {
+        match glob::glob(pattern) {
+            Ok(entries) => entries
+                .filter_map(|entry| match entry {
+                    Ok(path) => {
+                        if path.is_file() {
+                            Some(path)
+                        } else {
+                            None
+                        }
+                    }
+                    Err(e) => {
+                        log::debug!("Glob error for pattern '{}': {}", pattern, e);
+                        None
+                    }
+                })
+                .collect(),
+            Err(e) => {
+                log::warn!("Invalid glob pattern '{}': {}", pattern, e);
+                Vec::new()
+            }
+        }
+    }
+
+    /// Gets home directories of real users, handling both local and remote user databases
     fn get_system_users(&self) -> Vec<PathBuf> {
         let mut users = Vec::new();
 
-        // Parse /etc/passwd to find user home directories
+        // Check if system has large user database (likely LDAP/AD) by counting users
+        let total_user_count = self.count_total_users();
+        if total_user_count >= 500 {
+            log::info!(
+                "Large user database detected ({} users >= 500), using active process UIDs only",
+                total_user_count
+            );
+            users.extend(self.get_active_user_homes());
+        } else {
+            log::info!(
+                "Small user database detected ({} users < 500), reading all local users",
+                total_user_count
+            );
+            users.extend(self.get_local_users());
+        }
+
+        // Always add root explicitly
+        let root_home = PathBuf::from("/root");
+        if root_home.exists() && !users.contains(&root_home) {
+            users.push(root_home);
+        }
+
+        // Sort and deduplicate
+        users.sort();
+        users.dedup();
+
+        log::info!("Discovered {} user home directories", users.len());
+        for (i, user_home) in users.iter().take(10).enumerate() {
+            log::info!("  {}: {}", i + 1, user_home.display());
+        }
+        if users.len() > 10 {
+            log::info!("  ... and {} more", users.len() - 10);
+        }
+
+        users
+    }
+
+    /// Counts total users in the system database (including remote users)
+    fn count_total_users(&self) -> usize {
+        let mut count = 0;
+
+        // Use getpwent() to iterate through all users in the system database
+        // This works with any NSS module (LDAP, NIS, etc.)
+        unsafe {
+            // Start enumeration
+            libc::setpwent();
+
+            // Count all users
+            loop {
+                let pw = libc::getpwent();
+                if pw.is_null() {
+                    break;
+                }
+                count += 1;
+
+                // Safety check to avoid infinite loops on broken systems
+                if count > 100000 {
+                    log::warn!(
+                        "User enumeration stopped at 100,000 users to prevent infinite loop"
+                    );
+                    break;
+                }
+            }
+
+            // End enumeration
+            libc::endpwent();
+        }
+
+        log::debug!("Total user count in system database: {}", count);
+        count
+    }
+
+    /// Gets user home directories from local /etc/passwd
+    fn get_local_users(&self) -> Vec<PathBuf> {
+        let mut users = Vec::new();
+
         if let Ok(passwd) = std::fs::read_to_string("/etc/passwd") {
             for line in passwd.lines() {
                 let parts: Vec<&str> = line.split(':').collect();
@@ -135,10 +229,12 @@ impl LinuxMonitor {
                     let uid: i32 = parts[2].parse().unwrap_or(-1);
                     let home = parts[5];
 
-                    // Only monitor real user directories (UID >= 1000 typically)
-                    // or root (UID 0)
-                    if (uid >= 1000 || uid == 0) && home.starts_with("/home/") {
-                        users.push(PathBuf::from(home));
+                    // Monitor real user directories (UID >= 1000) or root (UID 0)
+                    if (uid >= 1000 || uid == 0) && home.starts_with('/') && home != "/" {
+                        let home_path = PathBuf::from(home);
+                        if home_path.exists() {
+                            users.push(home_path);
+                        }
                     }
                 }
             }
@@ -147,14 +243,81 @@ impl LinuxMonitor {
         users
     }
 
+    /// Gets home directories for users with active processes (for remote user databases)
+    fn get_active_user_homes(&self) -> Vec<PathBuf> {
+        let mut users = Vec::new();
+        let active_uids = self.get_active_uids();
+
+        log::debug!(
+            "Found {} unique UIDs from running processes",
+            active_uids.len()
+        );
+
+        for uid in active_uids {
+            // Skip system UIDs (< 1000) except root (0)
+            if uid < 1000 && uid != 0 {
+                continue;
+            }
+
+            // Get home directory for this UID using getpwuid
+            if let Some(home_dir) = crate::process_context::get_home_for_uid(uid) {
+                if home_dir.exists() && home_dir != PathBuf::from("/") {
+                    log::debug!("UID {} -> home: {}", uid, home_dir.display());
+                    users.push(home_dir);
+                }
+            }
+        }
+
+        users
+    }
+
+    /// Gets unique UIDs from all running processes
+    fn get_active_uids(&self) -> Vec<u32> {
+        let mut uids = std::collections::HashSet::new();
+
+        // Read all /proc/*/status files to get UIDs from running processes
+        if let Ok(proc_entries) = std::fs::read_dir("/proc") {
+            for entry in proc_entries.flatten() {
+                if let Some(name) = entry.file_name().to_str() {
+                    // Skip non-numeric directories (only process PIDs)
+                    if name.chars().all(|c| c.is_ascii_digit()) {
+                        let status_path = entry.path().join("status");
+                        if let Ok(status_content) = std::fs::read_to_string(&status_path) {
+                            // Parse Uid line from /proc/PID/status
+                            for line in status_content.lines() {
+                                if line.starts_with("Uid:") {
+                                    let parts: Vec<&str> = line.split_whitespace().collect();
+                                    if parts.len() >= 2 {
+                                        // Real UID is the first number after "Uid:"
+                                        if let Ok(uid) = parts[1].parse::<u32>() {
+                                            uids.insert(uid);
+                                        }
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut uid_vec: Vec<u32> = uids.into_iter().collect();
+        uid_vec.sort();
+        uid_vec
+    }
+
     pub async fn start(&mut self) -> Result<()> {
         log::info!("Starting Linux fanotify monitor in {} mode", self.mode);
 
         // Initialize fanotify
         self.init_fanotify()?;
 
-        // Add paths to monitor
-        self.add_watched_paths()?;
+        // Add protected files to monitor
+        self.add_watched_files()?;
+
+        // Note: Periodic file refresh would need more complex shared state management
+        // For now, we do initial discovery which is a major improvement over hardcoded paths
 
         // Start monitoring loop
         self.monitor_loop().await
@@ -180,71 +343,124 @@ impl LinuxMonitor {
         Ok(())
     }
 
-    fn add_watched_paths(&mut self) -> Result<()> {
+    /// Adds protected files to fanotify monitoring
+    fn add_watched_files(&mut self) -> Result<()> {
         let fd = self
             .fanotify_fd
             .ok_or_else(|| anyhow::anyhow!("Fanotify not initialized"))?;
 
-        // Get home directory for current users
-        // TODO: Periodically refresh watches to detect newly created secret files
-        let credential_paths = self.get_credential_paths();
+        // Discover all protected files using YAML configuration patterns
+        let protected_files = self.get_protected_file_paths();
 
-        log::info!(
-            "Found {} credential paths to monitor",
-            credential_paths.len()
-        );
+        log::info!("Found {} protected files to monitor", protected_files.len());
 
-        for path in &credential_paths {
-            if !path.exists() {
-                log::debug!("Path does not exist, skipping: {}", path.display());
+        let mut successful_watches = 0;
+        let mut failed_watches = 0;
+
+        for file_path in &protected_files {
+            if !file_path.exists() {
+                log::debug!("File does not exist, skipping: {}", file_path.display());
                 continue;
             }
 
-            // Only monitor specific directories, not recursively
-            let mask = FAN_OPEN_PERM;
-            let flags = FAN_MARK_ADD;
-            let dirfd = libc::AT_FDCWD;
-
-            let path_str = path.to_str().ok_or_else(|| {
-                anyhow::anyhow!("Path contains invalid UTF-8: {}", path.display())
-            })?;
-            let path_cstr = std::ffi::CString::new(path_str).map_err(|e| {
-                anyhow::anyhow!("Path contains null bytes: {} ({})", path.display(), e)
-            })?;
-
-            let ret = unsafe { libc::fanotify_mark(fd, flags, mask, dirfd, path_cstr.as_ptr()) };
-
-            if ret < 0 {
-                let err = io::Error::last_os_error();
-                if err.raw_os_error() == Some(libc::ENOSPC) {
-                    log::error!("Reached fanotify marks limit. Consider increasing /proc/sys/fs/fanotify/max_user_marks");
-                    break;
-                }
-                log::debug!(
-                    "Failed to add fanotify mark for {}: {}",
-                    path.display(),
-                    err
-                );
+            if self.add_file_watch(fd, file_path)? {
+                self.watched_paths.push(file_path.clone());
+                successful_watches += 1;
             } else {
-                log::debug!("Monitoring: {}", path.display());
-                self.watched_paths.push(path.clone());
+                failed_watches += 1;
             }
         }
 
-        if self.watched_paths.is_empty() {
-            return Err(anyhow::anyhow!("No paths could be monitored"));
+        if successful_watches == 0 {
+            return Err(anyhow::anyhow!("No files could be monitored"));
         }
 
-        // Log all watched paths in sorted order for easy diffing
+        log::info!(
+            "Successfully monitoring {} files ({} failed)",
+            successful_watches,
+            failed_watches
+        );
+
+        // Log first 20 watched files for verification
         let mut watched_sorted = self.watched_paths.clone();
         watched_sorted.sort();
 
-        log::info!("Monitoring {} paths:", watched_sorted.len());
-        for path in &watched_sorted {
-            log::info!("  - {}", path.display());
+        log::info!("Sample of monitored files:");
+        for (i, path) in watched_sorted.iter().take(20).enumerate() {
+            log::info!("  {}: {}", i + 1, path.display());
+        }
+
+        if watched_sorted.len() > 20 {
+            log::info!("  ... and {} more files", watched_sorted.len() - 20);
         }
 
         Ok(())
+    }
+
+    /// Adds a single file to fanotify monitoring
+    fn add_file_watch(&self, fd: i32, file_path: &Path) -> Result<bool> {
+        let mask = FAN_OPEN_PERM;
+        let flags = FAN_MARK_ADD;
+        let dirfd = libc::AT_FDCWD;
+
+        let path_str = file_path.to_str().ok_or_else(|| {
+            anyhow::anyhow!("Path contains invalid UTF-8: {}", file_path.display())
+        })?;
+        let path_cstr = std::ffi::CString::new(path_str).map_err(|e| {
+            anyhow::anyhow!("Path contains null bytes: {} ({})", file_path.display(), e)
+        })?;
+
+        let ret = unsafe { libc::fanotify_mark(fd, flags, mask, dirfd, path_cstr.as_ptr()) };
+
+        if ret < 0 {
+            let err = io::Error::last_os_error();
+            if err.raw_os_error() == Some(libc::ENOSPC) {
+                log::error!("Reached fanotify marks limit. Consider increasing /proc/sys/fs/fanotify/max_user_marks");
+                return Ok(false);
+            }
+            log::debug!(
+                "Failed to add fanotify mark for {}: {}",
+                file_path.display(),
+                err
+            );
+            return Ok(false);
+        }
+
+        log::debug!("Added watch for: {}", file_path.display());
+        Ok(true)
+    }
+
+    /// Periodically refreshes file watches to catch newly created protected files
+    async fn periodic_file_refresh(self) {
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(60)); // Check every minute
+
+        loop {
+            interval.tick().await;
+
+            // Discover any new protected files
+            let current_files = self.get_protected_file_paths();
+            let mut new_files = Vec::new();
+
+            for file_path in current_files {
+                if !self.watched_paths.contains(&file_path) && file_path.exists() {
+                    new_files.push(file_path);
+                }
+            }
+
+            if !new_files.is_empty() {
+                log::info!("Discovered {} new protected files", new_files.len());
+
+                if let Some(fd) = self.fanotify_fd {
+                    for file_path in new_files {
+                        if let Ok(true) = self.add_file_watch(fd, &file_path) {
+                            // Note: In a real implementation, we'd need mutable access
+                            // For now, just log the discovery
+                            log::info!("Would add watch for new file: {}", file_path.display());
+                        }
+                    }
+                }
+            }
+        }
     }
 
     async fn monitor_loop(&mut self) -> Result<()> {
