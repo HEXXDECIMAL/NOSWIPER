@@ -709,24 +709,57 @@ impl LinuxMonitor {
             }
         };
 
+        // Build process tree for logging (2 levels for allowed, 5 for denied)
+        let process_tree = self.build_process_tree(metadata.pid, 2);
+
         log::info!(
-            "PROTECTED FILE ACCESS: {} (PID {}) -> {}",
+            "PROTECTED FILE ACCESS: {} (PID {}) -> {}\nProcess tree:\n{}",
             process_path.display(),
             metadata.pid,
-            file_path.display()
+            file_path.display(),
+            process_tree
         );
+
+        // Get parent PID for context
+        let ppid = Self::get_parent_pid(metadata.pid).map(|p| p as u32);
+
+        // Get UID/EUID from /proc
+        let (uid, euid) = if let Ok(status) = std::fs::read_to_string(&format!("/proc/{}/status", metadata.pid)) {
+            let mut real_uid = None;
+            let mut eff_uid = None;
+            for line in status.lines() {
+                if line.starts_with("Uid:") {
+                    let parts: Vec<&str> = line.split_whitespace().collect();
+                    if parts.len() > 2 {
+                        real_uid = parts[1].parse::<u32>().ok();
+                        eff_uid = parts[2].parse::<u32>().ok();
+                    }
+                    break;
+                }
+            }
+            (real_uid, eff_uid)
+        } else {
+            (None, None)
+        };
+
+        // Get command-line arguments
+        let args = if let Ok(cmdline) = std::fs::read_to_string(&format!("/proc/{}/cmdline", metadata.pid)) {
+            Some(cmdline.split('\0').filter(|s| !s.is_empty()).map(String::from).collect())
+        } else {
+            None
+        };
 
         // Create process context for the new rule system
         use crate::process_context::ProcessContext;
         let context = ProcessContext {
             path: process_path.clone(),
             pid: Some(metadata.pid as u32),
-            ppid: None,    // TODO: Get parent PID on Linux
+            ppid,
             team_id: None, // Not available on Linux
             app_id: None,  // Not available on Linux
-            args: None,    // TODO: Get command-line args on Linux
-            uid: None,     // TODO: Get user ID on Linux
-            euid: None,    // TODO: Get effective user ID on Linux
+            args,
+            uid,
+            euid,
         };
 
         // Check if access is allowed using new context-aware method
@@ -744,32 +777,90 @@ impl LinuxMonitor {
                 self.respond_to_event(metadata.fd, FAN_ALLOW)?;
             }
             Decision::Deny => {
+                // Get detailed process tree for violations (5 levels)
+                let detailed_tree = self.build_process_tree(metadata.pid, 5);
+
                 match self.mode {
                     Mode::Monitor => {
                         log::warn!(
-                            "DETECTED: {} -> {}",
+                            "DETECTED: {} -> {}\nProcess tree:\n{}",
                             process_path.display(),
-                            file_path.display()
+                            file_path.display(),
+                            detailed_tree
                         );
                         // In monitor mode, allow but log
                         self.respond_to_event(metadata.fd, FAN_ALLOW)?;
                     }
                     Mode::Enforce => {
-                        log::error!(
+                        // Suspend the process immediately
+                        let stopped = self.suspend_process(metadata.pid);
+
+                        // Try to suspend parent if requested
+                        let parent_stopped = if self.stop_parent {
+                            if let Some(ppid) = ppid {
+                                if ppid > 1 {  // Don't try to stop init
+                                    if self.suspend_process(ppid as i32) {
+                                        log::info!("Stopped parent process (PID {})", ppid);
+                                        true
+                                    } else {
+                                        false
+                                    }
+                                } else {
+                                    false
+                                }
+                            } else {
+                                false
+                            }
+                        } else {
+                            false
+                        };
+
+                        let mut log_msg = format!(
                             "BLOCKED: {} -> {}",
                             process_path.display(),
                             file_path.display()
                         );
+
+                        if stopped {
+                            log_msg.push_str(&format!("\n  Process SUSPENDED (PID {})", metadata.pid));
+                        }
+                        if parent_stopped {
+                            log_msg.push_str(&format!("\n  Parent SUSPENDED (PID {})", ppid.unwrap()));
+                        }
+
+                        log_msg.push_str(&format!("\nProcess tree:\n{}", detailed_tree));
+                        log::error!("{}", log_msg);
+
                         // Actually block the access
                         self.respond_to_event(metadata.fd, FAN_DENY)?;
                     }
                     Mode::Interactive => {
+                        // Suspend process while waiting for user decision
+                        let suspended = self.suspend_process(metadata.pid);
+
+                        if suspended {
+                            log::warn!(
+                                "Process {} SUSPENDED while waiting for user decision",
+                                metadata.pid
+                            );
+                        }
+
                         let allow = self
                             .handle_interactive_prompt(&process_path, &file_path)
                             .await?;
+
+                        // Resume the process before responding (if we suspended it)
+                        if suspended {
+                            self.resume_process(metadata.pid);
+                        }
+
                         if allow {
                             self.respond_to_event(metadata.fd, FAN_ALLOW)?;
                         } else {
+                            // In interactive mode, if denied, keep it suspended
+                            if !suspended {
+                                self.suspend_process(metadata.pid);
+                            }
                             self.respond_to_event(metadata.fd, FAN_DENY)?;
                         }
                     }
@@ -787,6 +878,142 @@ impl LinuxMonitor {
         let proc_path = format!("/proc/self/fd/{}", fd);
         let path = std::fs::read_link(proc_path)?;
         Ok(path)
+    }
+
+    /// Get parent PID from /proc/PID/stat
+    fn get_parent_pid(pid: i32) -> Option<i32> {
+        let stat_path = format!("/proc/{}/stat", pid);
+        if let Ok(stat) = std::fs::read_to_string(&stat_path) {
+            // Format: pid (comm) state ppid ...
+            // Find the last ) and parse fields after it
+            if let Some(pos) = stat.rfind(')') {
+                let fields: Vec<&str> = stat[pos + 1..].split_whitespace().collect();
+                if fields.len() > 1 {
+                    // ppid is the second field after the command name
+                    if let Ok(ppid) = fields[1].parse::<i32>() {
+                        return Some(ppid);
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// Suspend a process using SIGSTOP
+    fn suspend_process(&self, pid: i32) -> bool {
+        unsafe {
+            let result = libc::kill(pid as libc::pid_t, libc::SIGSTOP);
+            if result == 0 {
+                log::info!("Successfully suspended process PID {}", pid);
+                return true;
+            }
+
+            // Check errno to understand why it failed
+            let errno = *libc::__errno_location();
+            match errno {
+                libc::ESRCH => {
+                    log::debug!("Process {} not found (already exited)", pid);
+                }
+                libc::EPERM => {
+                    log::error!("Permission denied to suspend process {} (need root)", pid);
+                }
+                _ => {
+                    log::error!("Failed to suspend process {}: errno {}", pid, errno);
+                }
+            }
+            false
+        }
+    }
+
+    /// Resume a suspended process using SIGCONT
+    #[allow(dead_code)]
+    fn resume_process(&self, pid: i32) -> bool {
+        unsafe {
+            let result = libc::kill(pid as libc::pid_t, libc::SIGCONT);
+            if result == 0 {
+                log::info!("Successfully resumed process PID {}", pid);
+                true
+            } else {
+                let errno = *libc::__errno_location();
+                log::error!("Failed to resume process {}: errno {}", pid, errno);
+                false
+            }
+        }
+    }
+
+    /// Build a visual process tree for logging
+    fn build_process_tree(&self, pid: i32, max_levels: usize) -> String {
+        let mut tree = Vec::new();
+        let mut current_pid = Some(pid);
+        let mut level = 0;
+
+        while let Some(p) = current_pid {
+            if level >= max_levels || p <= 1 {
+                break;
+            }
+
+            let indent = "  ".repeat(level);
+            let prefix = if level == 0 { "→" } else { "└─" };
+
+            // Get process info
+            let cmdline_path = format!("/proc/{}/cmdline", p);
+            let exe_path = format!("/proc/{}/exe", p);
+
+            let process_name = if let Ok(exe) = std::fs::read_link(&exe_path) {
+                exe.file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("?")
+                    .to_string()
+            } else {
+                "?".to_string()
+            };
+
+            let cmdline = if let Ok(cmd) = std::fs::read_to_string(&cmdline_path) {
+                cmd.replace('\0', " ").trim().to_string()
+            } else {
+                process_name.clone()
+            };
+
+            // Get UID
+            let uid = if let Ok(status) = std::fs::read_to_string(&format!("/proc/{}/status", p)) {
+                status.lines()
+                    .find(|line| line.starts_with("Uid:"))
+                    .and_then(|line| {
+                        let parts: Vec<&str> = line.split_whitespace().collect();
+                        if parts.len() > 1 {
+                            parts[1].parse::<u32>().ok()
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or(0)
+            } else {
+                0
+            };
+
+            tree.push(format!(
+                "{}{} [{}] {} (uid={})",
+                indent,
+                prefix,
+                p,
+                if cmdline.len() > 100 {
+                    format!("{}...", &cmdline[..100])
+                } else {
+                    cmdline
+                },
+                uid
+            ));
+
+            // Get parent PID for next iteration
+            current_pid = Self::get_parent_pid(p);
+            level += 1;
+        }
+
+        if tree.is_empty() {
+            tree.push(format!("→ [{}] (process info unavailable)", pid));
+        }
+
+        tree.join("\n")
     }
 
     fn get_process_path(&mut self, pid: i32) -> Result<PathBuf> {
