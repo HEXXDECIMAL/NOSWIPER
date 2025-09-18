@@ -450,6 +450,11 @@ impl LinuxMonitor {
 
     /// Adds a single file to fanotify monitoring
     fn add_file_watch(&self, fd: i32, file_path: &Path) -> Result<bool> {
+        Self::add_file_watch_static(fd, file_path)
+    }
+
+    /// Static version for periodic discovery
+    fn add_file_watch_static(fd: i32, file_path: &Path) -> Result<bool> {
         let mask = FAN_OPEN_PERM;
         let flags = FAN_MARK_ADD;
         let dirfd = libc::AT_FDCWD;
@@ -494,12 +499,13 @@ impl LinuxMonitor {
 
             if let Some(fd) = fanotify_fd {
                 // Create a temporary monitor instance to access discovery methods
+                // IMPORTANT: Set fanotify_fd to None so Drop doesn't close it!
                 let temp_monitor = LinuxMonitor {
                     rule_engine: rule_engine.clone(),
                     mode: Mode::Monitor, // Doesn't matter for discovery
                     verbose: false,
                     stop_parent: false,
-                    fanotify_fd: Some(fd),
+                    fanotify_fd: None,  // Don't give ownership of the fd!
                     watched_paths: Arc::clone(&watched_paths),
                     pid_cache: HashMap::new(),
                 };
@@ -529,7 +535,8 @@ impl LinuxMonitor {
 
                     let mut successful_new_watches = 0;
                     for file_path in new_files {
-                        if let Ok(true) = temp_monitor.add_file_watch(fd, &file_path) {
+                        // Use the fd directly, not through temp_monitor
+                        if let Ok(true) = LinuxMonitor::add_file_watch_static(fd, &file_path) {
                             match watched_paths.lock() {
                                 Ok(mut guard) => {
                                     guard.push(file_path.clone());
@@ -582,12 +589,29 @@ impl LinuxMonitor {
 
             log::info!("Received fanotify event(s), {} bytes", len);
 
-            // Dump the first few bytes for debugging
+            // Always dump the raw bytes for debugging
             if len > 0 && len <= 100 {
                 let hex: Vec<String> = buffer[..len as usize].iter()
                     .map(|b| format!("{:02x}", b))
                     .collect();
-                log::debug!("Raw event data: {}", hex.join(" "));
+                log::info!("Raw event data: {}", hex.join(" "));
+
+                // Manually parse the first event for debugging
+                if len >= 24 {
+                    let event_len = u32::from_ne_bytes([buffer[0], buffer[1], buffer[2], buffer[3]]);
+                    let vers = buffer[4];
+                    let reserved = buffer[5];
+                    let metadata_len = u16::from_ne_bytes([buffer[6], buffer[7]]);
+                    let mask = u64::from_ne_bytes([
+                        buffer[8], buffer[9], buffer[10], buffer[11],
+                        buffer[12], buffer[13], buffer[14], buffer[15]
+                    ]);
+                    let fd = i32::from_ne_bytes([buffer[16], buffer[17], buffer[18], buffer[19]]);
+                    let pid = i32::from_ne_bytes([buffer[20], buffer[21], buffer[22], buffer[23]]);
+
+                    log::info!("Manual parse: event_len={}, vers={}, metadata_len={}, mask=0x{:x}, fd={}, pid={}",
+                        event_len, vers, metadata_len, mask, fd, pid);
+                }
             }
 
             // Process events
