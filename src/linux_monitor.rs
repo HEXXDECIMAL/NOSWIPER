@@ -28,7 +28,7 @@ const FAN_CLOEXEC: u32 = 0x00000001;
 
 // Fanotify event metadata structure - must match kernel struct exactly!
 // From /usr/include/linux/fanotify.h
-#[repr(C, packed)]
+#[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct FanotifyEventMetadata {
     pub event_len: u32,      // Total length of this event metadata
