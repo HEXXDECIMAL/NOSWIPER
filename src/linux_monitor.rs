@@ -118,10 +118,24 @@ impl LinuxMonitor {
 
         // If pattern starts with ~, expand for each user
         if pattern.starts_with('~') {
-            log::info!("Expanding ~ pattern '{}' for {} users", pattern, users.len());
+            log::debug!("Expanding ~ pattern '{}' for {} users", pattern, users.len());
             for user_home in users {
-                let expanded_pattern = pattern.replacen('~', &user_home.to_string_lossy(), 1);
-                log::info!("  Expanding '{}' -> '{}'", pattern, expanded_pattern);
+                // Skip problematic home directories
+                let home_str = user_home.to_string_lossy();
+                if home_str == "/" || home_str == "/bin" || home_str == "/sbin" || home_str == "/usr/games" {
+                    log::debug!("  Skipping system path: {}", home_str);
+                    continue;
+                }
+
+                let expanded_pattern = pattern.replacen('~', &home_str, 1);
+                log::debug!("  Expanding '{}' -> '{}'", pattern, expanded_pattern);
+
+                // Skip patterns that would scan entire filesystem
+                if expanded_pattern.starts_with("//**") || expanded_pattern.contains("//") {
+                    log::warn!("  Skipping dangerous pattern: {}", expanded_pattern);
+                    continue;
+                }
+
                 let found = self.glob_pattern(&expanded_pattern);
                 if !found.is_empty() {
                     log::info!("    User {}: found {} files",
@@ -146,14 +160,30 @@ impl LinuxMonitor {
 
     /// Uses glob to find files matching a pattern
     fn glob_pattern(&self, pattern: &str) -> Vec<PathBuf> {
-        log::info!("Glob checking pattern: {}", pattern);
+        log::debug!("Glob checking pattern: {}", pattern);
+
+        // Skip patterns that would scan too much
+        if pattern.contains("**") && (pattern.contains("/./") || pattern.starts_with("/**")) {
+            log::warn!("  Skipping overly broad pattern: {}", pattern);
+            return Vec::new();
+        }
+
         match glob::glob(pattern) {
             Ok(entries) => {
                 let mut results = Vec::new();
+                let mut count = 0;
+                const MAX_GLOB_RESULTS: usize = 1000;
+
                 for entry in entries {
+                    count += 1;
+                    if count > MAX_GLOB_RESULTS {
+                        log::warn!("  Pattern {} matched too many files (>{} ), stopping", pattern, MAX_GLOB_RESULTS);
+                        break;
+                    }
+
                     match entry {
                         Ok(path) => {
-                            log::info!("  Glob found path: {} (is_file: {}, exists: {})",
+                            log::debug!("  Glob found path: {} (is_file: {}, exists: {})",
                                 path.display(), path.is_file(), path.exists());
                             if path.is_file() {
                                 results.push(path);
@@ -165,7 +195,7 @@ impl LinuxMonitor {
                     }
                 }
                 if results.is_empty() {
-                    log::info!("  No files matched pattern: {}", pattern);
+                    log::debug!("  No files matched pattern: {}", pattern);
                 }
                 results
             }
@@ -350,8 +380,14 @@ impl LinuxMonitor {
 
         let mut successful_watches = 0;
         let mut failed_watches = 0;
+        let total = protected_files.len();
+        let mut current = 0;
 
         for file_path in &protected_files {
+            current += 1;
+            if current % 100 == 0 || current == total {
+                log::info!("Processing file {}/{}", current, total);
+            }
             log::debug!("Checking existence of: {}", file_path.display());
             if !file_path.exists() {
                 log::warn!("File does not exist, skipping: {}", file_path.display());
@@ -360,11 +396,18 @@ impl LinuxMonitor {
             log::debug!("File exists, will add watch: {}", file_path.display());
 
             if self.add_file_watch(fd, file_path)? {
-                self.watched_paths
-                    .lock()
-                    .map_err(|e| anyhow::anyhow!("Mutex lock poisoned: {}", e))?
-                    .push(file_path.clone());
-                successful_watches += 1;
+                log::debug!("Getting mutex lock to add path to watched list...");
+                match self.watched_paths.lock() {
+                    Ok(mut guard) => {
+                        guard.push(file_path.clone());
+                        successful_watches += 1;
+                        log::debug!("Added path to watched list");
+                    }
+                    Err(e) => {
+                        log::error!("Failed to acquire mutex lock: {}", e);
+                        return Err(anyhow::anyhow!("Mutex lock poisoned: {}", e));
+                    }
+                }
             } else {
                 failed_watches += 1;
             }
@@ -382,9 +425,14 @@ impl LinuxMonitor {
             );
 
             // Log ALL watched files for verification
-            let watched_paths = self.watched_paths
-                .lock()
-                .map_err(|e| anyhow::anyhow!("Mutex lock poisoned: {}", e))?;
+            log::info!("Getting final mutex lock to log watched files...");
+            let watched_paths = match self.watched_paths.lock() {
+                Ok(guard) => guard,
+                Err(e) => {
+                    log::error!("Failed to get final mutex lock: {}", e);
+                    return Err(anyhow::anyhow!("Mutex lock poisoned: {}", e));
+                }
+            };
             let mut watched_sorted = watched_paths.clone();
             watched_sorted.sort();
 
