@@ -1,6 +1,4 @@
-use crate::defaults::{
-    build_protection_rules, is_excluded_path, LINUX_COMMON_PATHS, MACOS_COMMON_PATHS,
-};
+use crate::config::Config;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -13,16 +11,16 @@ pub enum Decision {
 
 #[derive(Clone)]
 pub struct RuleEngine {
-    // Pattern -> allowed programs
-    protection_rules: HashMap<String, Vec<String>>,
+    // Configuration loaded from YAML
+    config: Config,
     // Runtime exceptions (process_path, file_path) -> expires_at
     runtime_exceptions: HashMap<(PathBuf, PathBuf), Option<Instant>>,
 }
 
 impl RuleEngine {
-    pub fn new() -> Self {
+    pub fn new(config: Config) -> Self {
         Self {
-            protection_rules: build_protection_rules(),
+            config,
             runtime_exceptions: HashMap::new(),
         }
     }
@@ -32,13 +30,14 @@ impl RuleEngine {
         let file_str = file_path.to_string_lossy();
 
         // First check if it's explicitly excluded
-        if is_excluded_path(&file_str) {
+        if self.config.is_excluded(&file_str) {
             return false;
         }
 
         // Check if any protection pattern matches
-        for pattern_str in self.protection_rules.keys() {
-            if let Ok(pattern) = glob::Pattern::new(pattern_str) {
+        for protected_file in &self.config.protected_files {
+            let expanded_pattern = shellexpand::tilde(&protected_file.pattern);
+            if let Ok(pattern) = glob::Pattern::new(&expanded_pattern) {
                 if pattern.matches_path(file_path) {
                     return true;
                 }
@@ -49,7 +48,7 @@ impl RuleEngine {
     }
 
     /// Check if a process is allowed to access a file
-    pub fn check_access(&self, process_path: &Path, file_path: &Path) -> Decision {
+    pub fn check_access(&self, process_path: &Path, file_path: &Path, signing_info: Option<&str>) -> Decision {
         // First check runtime exceptions
         let exception_key = (process_path.to_path_buf(), file_path.to_path_buf());
         if let Some(expires_at) = self.runtime_exceptions.get(&exception_key) {
@@ -60,10 +59,16 @@ impl RuleEngine {
         }
 
         // Find the protection rule that matches this file
-        for (pattern_str, allowed_programs) in &self.protection_rules {
-            if let Ok(pattern) = glob::Pattern::new(pattern_str) {
+        for protected_file in &self.config.protected_files {
+            let expanded_pattern = shellexpand::tilde(&protected_file.pattern);
+            if let Ok(pattern) = glob::Pattern::new(&expanded_pattern) {
                 if pattern.matches_path(file_path) {
-                    return self.check_process_allowed(process_path, allowed_programs);
+                    return self.check_process_allowed(
+                        process_path,
+                        &protected_file.allowed_programs,
+                        &protected_file.allowed_signers,
+                        signing_info,
+                    );
                 }
             }
         }
@@ -72,7 +77,32 @@ impl RuleEngine {
         Decision::Allow
     }
 
-    fn check_process_allowed(&self, process_path: &Path, allowed_programs: &[String]) -> Decision {
+    fn check_process_allowed(
+        &self,
+        process_path: &Path,
+        allowed_programs: &[String],
+        allowed_signers: &[String],
+        signing_info: Option<&str>,
+    ) -> Decision {
+        // First check if this is trusted by signing (macOS only)
+        if let Some(signer) = signing_info {
+            // Check global trusted signers
+            for trusted_signer in &self.config.global_trusted_signers {
+                if signer.contains(trusted_signer) {
+                    log::debug!("Process allowed by global trusted signer: {}", trusted_signer);
+                    return Decision::Allow;
+                }
+            }
+
+            // Check file-specific allowed signers
+            for allowed_signer in allowed_signers {
+                if signer.contains(allowed_signer) {
+                    log::debug!("Process allowed by signer: {}", allowed_signer);
+                    return Decision::Allow;
+                }
+            }
+        }
+
         // Get the process name
         let process_name = process_path
             .file_name()
@@ -129,28 +159,13 @@ impl RuleEngine {
     }
 
     fn is_in_allowed_paths(&self, process_path: &Path) -> bool {
-        let path_str = process_path.to_string_lossy();
-
-        let allowed_paths = if cfg!(target_os = "macos") {
-            MACOS_COMMON_PATHS
-        } else if cfg!(target_os = "linux") {
-            LINUX_COMMON_PATHS
-        } else {
-            // For other platforms, be more restrictive
-            &["/usr/bin/*", "/bin/*"]
-        };
-
-        for allowed_pattern in allowed_paths {
-            if let Ok(pattern) = glob::Pattern::new(allowed_pattern) {
-                if pattern.matches(&path_str) {
-                    log::debug!(
-                        "Process path {} matches allowed pattern {}",
-                        path_str,
-                        allowed_pattern
-                    );
-                    return true;
-                }
-            }
+        // Check if the process is in configured allowed paths
+        if self.config.is_allowed_path(process_path) {
+            log::debug!(
+                "Process path {} is in allowed paths",
+                process_path.display()
+            );
+            return true;
         }
 
         // Additional verification for macOS code signatures
@@ -177,7 +192,7 @@ impl RuleEngine {
             }
         }
 
-        log::debug!("Process path {} not in allowed paths", path_str);
+        log::debug!("Process path {} not in allowed paths", process_path.display());
         false
     }
 
@@ -291,9 +306,13 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
+    fn test_config() -> Config {
+        Config::default().expect("Failed to load default config")
+    }
+
     #[test]
     fn test_ssh_key_protection() {
-        let engine = RuleEngine::new();
+        let engine = RuleEngine::new(test_config());
 
         // Use shellexpand to match how the actual code works
         let ssh_key = PathBuf::from(shellexpand::tilde("~/.ssh/id_rsa").to_string());
@@ -306,14 +325,14 @@ mod tests {
 
     #[test]
     fn test_ssh_access_allowed() {
-        let engine = RuleEngine::new();
+        let engine = RuleEngine::new(test_config());
 
         let ssh_key = PathBuf::from(shellexpand::tilde("~/.ssh/id_rsa").to_string());
         let ssh_binary = PathBuf::from("/usr/bin/ssh");
 
         // This would normally check if /usr/bin/ssh is legitimate
         // In a real test environment, we'd mock this
-        let decision = engine.check_access(&ssh_binary, &ssh_key);
+        let decision = engine.check_access(&ssh_binary, &ssh_key, None);
 
         // SSH should be allowed to access SSH keys (if in legitimate location)
         if engine.is_in_allowed_paths(&ssh_binary) {
@@ -323,51 +342,51 @@ mod tests {
 
     #[test]
     fn test_unknown_binary_blocked() {
-        let engine = RuleEngine::new();
+        let engine = RuleEngine::new(test_config());
 
         let ssh_key = PathBuf::from(shellexpand::tilde("~/.ssh/id_rsa").to_string());
         let malware = PathBuf::from("/tmp/malware");
 
         // Check if this is a protected file first
         if engine.is_protected_file(&ssh_key) {
-            let decision = engine.check_access(&malware, &ssh_key);
+            let decision = engine.check_access(&malware, &ssh_key, None);
             assert_eq!(decision, Decision::Deny);
         } else {
             // If not protected, it would be allowed
-            let decision = engine.check_access(&malware, &ssh_key);
+            let decision = engine.check_access(&malware, &ssh_key, None);
             assert_eq!(decision, Decision::Allow);
         }
     }
 
     #[test]
     fn test_runtime_exception() {
-        let mut engine = RuleEngine::new();
+        let mut engine = RuleEngine::new(test_config());
 
         let ssh_key = PathBuf::from(shellexpand::tilde("~/.ssh/id_rsa").to_string());
         let custom_tool = PathBuf::from("/tmp/backup-tool");
 
         // Should be denied initially if this is a protected file
         if engine.is_protected_file(&ssh_key) {
-            let decision = engine.check_access(&custom_tool, &ssh_key);
+            let decision = engine.check_access(&custom_tool, &ssh_key, None);
             assert_eq!(decision, Decision::Deny);
 
             // Add runtime exception
             engine.add_runtime_exception(custom_tool.clone(), ssh_key.clone());
 
             // Should be allowed now
-            let decision = engine.check_access(&custom_tool, &ssh_key);
+            let decision = engine.check_access(&custom_tool, &ssh_key, None);
             assert_eq!(decision, Decision::Allow);
         } else {
             // If the file isn't protected, test a different scenario
             // Use a hardcoded path we know will be protected
             let protected_file = PathBuf::from(shellexpand::tilde("~/.ssh/id_ed25519").to_string());
             if engine.is_protected_file(&protected_file) {
-                let decision = engine.check_access(&custom_tool, &protected_file);
+                let decision = engine.check_access(&custom_tool, &protected_file, None);
                 assert_eq!(decision, Decision::Deny);
 
                 engine.add_runtime_exception(custom_tool.clone(), protected_file.clone());
 
-                let decision = engine.check_access(&custom_tool, &protected_file);
+                let decision = engine.check_access(&custom_tool, &protected_file, None);
                 assert_eq!(decision, Decision::Allow);
             }
         }

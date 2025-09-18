@@ -1,5 +1,6 @@
 #[cfg(target_os = "linux")]
 use crate::cli::Mode;
+use crate::config::Config;
 use crate::rules::{Decision, RuleEngine};
 use anyhow::Result;
 use nix::errno::Errno;
@@ -62,17 +63,22 @@ pub struct LinuxMonitor {
     rule_engine: RuleEngine,
     mode: Mode,
     verbose: bool,
+    stop_parent: bool,
     fanotify_fd: Option<i32>,
     watched_paths: Vec<PathBuf>,
     pid_cache: HashMap<i32, PathBuf>,
 }
 
 impl LinuxMonitor {
-    pub fn new(mode: Mode, verbose: bool) -> Self {
+    pub fn new(mode: Mode, verbose: bool, stop_parent: bool) -> Self {
+        // Load config from embedded YAML
+        let config = Config::default().expect("Failed to load default config");
+
         Self {
-            rule_engine: RuleEngine::new(),
+            rule_engine: RuleEngine::new(config),
             mode,
             verbose,
+            stop_parent,
             fanotify_fd: None,
             watched_paths: vec![],
             pid_cache: HashMap::new(),
@@ -304,7 +310,7 @@ impl LinuxMonitor {
         );
 
         // Check if access is allowed
-        let decision = self.rule_engine.check_access(&process_path, &file_path);
+        let decision = self.rule_engine.check_access(&process_path, &file_path, None);
 
         match decision {
             Decision::Allow => {

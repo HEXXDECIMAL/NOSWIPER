@@ -17,6 +17,10 @@ pub struct Args {
     #[arg(long, short)]
     pub verbose: bool,
 
+    /// Also stop parent process when stopping violating process
+    #[arg(long, default_value = "true")]
+    pub stop_parent: bool,
+
     /// Monitoring mechanism to use
     #[arg(long, value_enum)]
     pub mechanism: Option<Mechanism>,

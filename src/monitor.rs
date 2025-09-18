@@ -1,4 +1,5 @@
 use crate::cli::{Mechanism, Mode};
+use crate::config::Config;
 use crate::rules::{Decision, RuleEngine};
 use anyhow::Result;
 use serde::Deserialize;
@@ -15,6 +16,7 @@ pub struct Monitor {
     mode: Mode,
     mechanism: Mechanism,
     verbose: bool,
+    stop_parent: bool,
 }
 
 // These structs are for potential future use with typed JSON parsing
@@ -27,12 +29,16 @@ struct EsloggerEvent {
 }
 
 impl Monitor {
-    pub fn new(mode: Mode, mechanism: Mechanism, verbose: bool) -> Self {
+    pub fn new(mode: Mode, mechanism: Mechanism, verbose: bool, stop_parent: bool) -> Self {
+        // Load config from embedded YAML
+        let config = Config::default().expect("Failed to load default config");
+
         Self {
-            rule_engine: RuleEngine::new(),
+            rule_engine: RuleEngine::new(config),
             mode,
             mechanism,
             verbose,
+            stop_parent,
         }
     }
 
@@ -134,10 +140,8 @@ impl Monitor {
 
             event_count += 1;
 
-            // Log first few events at info level to debug
-            if event_count <= 5 {
-                log::info!("Raw eslogger event #{}: {}", event_count, line);
-            } else if event_count % 100 == 0 {
+            // Log progress periodically
+            if event_count % 1000 == 0 {
                 log::debug!("Processed {} eslogger events", event_count);
             }
 
@@ -146,11 +150,11 @@ impl Monitor {
 
             // Process critical events immediately in parallel
             match self.parse_eslogger_event(&line) {
-                Ok(Some((process_path, file_path, pid))) => {
+                Ok(Some((process_path, file_path, pid, ppid, signing_info))) => {
                     // For protected files, handle immediately
                     if self.rule_engine.is_protected_file(&file_path) {
                         // Handle synchronously for speed
-                        self.handle_file_access_with_signing(&process_path, &file_path, pid, signing_info)
+                        self.handle_file_access_with_signing(&process_path, &file_path, pid, ppid, signing_info)
                             .await?;
                     } else {
                         // Log non-critical events asynchronously
@@ -236,7 +240,7 @@ impl Monitor {
         exists
     }
 
-    fn parse_eslogger_event(&self, line: &str) -> Result<Option<(PathBuf, PathBuf, Option<u32>)>> {
+    fn parse_eslogger_event(&self, line: &str) -> Result<Option<(PathBuf, PathBuf, Option<u32>, Option<u32>, Option<String>)>> {
         // Try to parse as generic JSON first to see structure
         let json: serde_json::Value = serde_json::from_str(line)?;
 
@@ -291,6 +295,12 @@ impl Monitor {
             .and_then(|p| p.as_u64())
             .map(|p| p as u32);
 
+        // Extract parent PID (ppid)
+        let ppid = json.get("process")
+            .and_then(|p| p.get("ppid"))
+            .and_then(|p| p.as_u64())
+            .map(|p| p as u32);
+
         // Extract signing info from eslogger (no filesystem access!)
         let signing_id = json.get("process")
             .and_then(|p| p.get("signing_id"))
@@ -312,6 +322,7 @@ impl Monitor {
             PathBuf::from(process_path),
             PathBuf::from(file_path),
             pid,
+            ppid,
             signing_info,
         )))
     }
@@ -321,22 +332,21 @@ impl Monitor {
         process_path: &Path,
         file_path: &Path,
         pid: Option<u32>,
+        ppid: Option<u32>,
         signing_info: Option<String>,
     ) -> Result<()> {
         // Resolve symlinks to get real paths
         let real_file_path = self.normalize_path(file_path);
         let real_process_path = self.normalize_path(process_path);
 
-        // Get process name and code signing info
-        let process_name = real_process_path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("unknown");
+        // Get code signing info
 
         let pid_str = pid.map_or(String::from("?"), |p| p.to_string());
+        let ppid_str = ppid.map_or(String::from("?"), |p| p.to_string());
 
         // Use signing info from eslogger - NEVER access the binary!
         let signer_info = signing_info
+            .as_ref()
             .map(|s| format!(" [{}]", s))
             .unwrap_or_default();
 
@@ -347,9 +357,10 @@ impl Monitor {
             // Log non-protected file access only in verbose mode
             if self.verbose {
                 log::info!(
-                    "{}[{}]{}: open {}: OK",
-                    process_name,
+                    "{}[{}/ppid:{}]{}: open {}: OK (not monitored)",
+                    real_process_path.display(),
                     pid_str,
+                    ppid_str,
                     signer_info,
                     real_file_path.display()
                 );
@@ -362,51 +373,131 @@ impl Monitor {
         // Check if access is allowed
         let decision = self
             .rule_engine
-            .check_access(&real_process_path, &real_file_path);
+            .check_access(&real_process_path, &real_file_path, signing_info.as_deref());
 
         match decision {
             Decision::Allow => {
-                // Log allowed access to protected files only in verbose mode
-                if self.verbose {
-                    log::info!(
-                        "{}[{}]{}: open {}: OK (allowed)",
-                        process_name,
-                        pid_str,
-                        signer_info,
-                        real_file_path.display()
-                    );
-                }
+                // Always log allowed access to protected files (they're on our monitoring list)
+                log::info!(
+                    "{}[{}/ppid:{}]{}: open {}: OK (allowed)",
+                    real_process_path.display(),
+                    pid_str,
+                    ppid_str,
+                    signer_info,
+                    real_file_path.display()
+                );
             }
             Decision::Deny => {
                 match self.mode {
                     Mode::Monitor => {
-                        log::warn!(
-                            "{}[{}]{}: open {}: DETECTED (monitor mode)",
-                            process_name,
+                        // Get command-line args if we can
+                        let cmdline = if let Some(pid) = pid {
+                            self.get_process_cmdline(pid)
+                        } else {
+                            None
+                        };
+
+                        // Get parent command line if available
+                        let parent_cmdline = if let Some(ppid) = ppid {
+                            if ppid > 1 {  // Don't try for init
+                                self.get_process_cmdline(ppid)
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        };
+
+                        // Build log message
+                        let mut log_msg = format!(
+                            "{}[{}/ppid:{}]{}: open {}: DETECTED (monitor mode)",
+                            real_process_path.display(),
                             pid_str,
+                            ppid_str,
                             signer_info,
                             real_file_path.display()
                         );
+
+                        if let Some(cmdline) = cmdline {
+                            log_msg.push_str(&format!("\n  Args: {}", cmdline));
+                        }
+
+                        if let Some(parent_cmd) = parent_cmdline {
+                            log_msg.push_str(&format!("\n  ↳ Parent: {}", parent_cmd));
+                        }
+
+                        log::warn!("{}", log_msg);
                     }
                     Mode::Enforce => {
                         // On macOS with eslogger, we can suspend the process
                         #[cfg(target_os = "macos")]
                         if let Some(pid) = pid {
                             // Suspend the process
-                            if self.suspend_process(pid) {
-                                log::error!(
-                                    "{}[{}]{}: open {}: STOPPED",
-                                    process_name,
+                            let stopped = self.suspend_process(pid);
+
+                            // Also suspend parent if requested and possible
+                            let (parent_stopped, parent_cmdline) = if self.stop_parent && stopped {
+                                if let Some(ppid) = ppid {
+                                    if ppid > 1 {  // Don't try to stop init (pid 1)
+                                        if self.suspend_process(ppid) {
+                                            // Get parent command line after stopping it
+                                            let parent_cmd = self.get_process_cmdline(ppid);
+                                            if let Some(ref cmd) = parent_cmd {
+                                                log::info!("Also stopped parent process (PID {}): {}", ppid, cmd);
+                                            } else {
+                                                log::info!("Also stopped parent process (PID {})", ppid);
+                                            }
+                                            (true, parent_cmd)
+                                        } else {
+                                            (false, None)
+                                        }
+                                    } else {
+                                        (false, None)
+                                    }
+                                } else {
+                                    (false, None)
+                                }
+                            } else {
+                                (false, None)
+                            };
+
+                            if stopped {
+                                // Get command-line args after stopping the process
+                                let cmdline = self.get_process_cmdline(pid);
+
+                                let parent_info = if parent_stopped {
+                                    format!(" + parent[{}]", ppid.unwrap())
+                                } else {
+                                    String::new()
+                                };
+
+                                // Build log message with command lines
+                                let mut log_msg = format!(
+                                    "{}[{}/ppid:{}]{}: open {}: STOPPED{}",
+                                    real_process_path.display(),
                                     pid,
+                                    ppid.map_or(String::from("?"), |p| p.to_string()),
                                     signer_info,
-                                    real_file_path.display()
+                                    real_file_path.display(),
+                                    parent_info
                                 );
+
+                                if let Some(cmdline) = cmdline {
+                                    log_msg.push_str(&format!("\n  Args: {}", cmdline));
+                                }
+
+                                if let Some(parent_cmd) = parent_cmdline {
+                                    log_msg.push_str(&format!("\n  ↳ Parent: {}", parent_cmd));
+                                }
+
+                                log::error!("{}", log_msg);
                             } else {
                                 // Process likely exited already - still log the violation
                                 log::error!(
-                                    "{}[{}]{}: open {}: VIOLATION (process exited)",
-                                    process_name,
+                                    "{}[{}/ppid:{}]{}: open {}: VIOLATION (process exited)",
+                                    real_process_path.display(),
                                     pid,
+                                    ppid.map_or(String::from("?"), |p| p.to_string()),
                                     signer_info,
                                     real_file_path.display()
                                 );
@@ -414,7 +505,7 @@ impl Monitor {
                         } else {
                             log::error!(
                                 "{}[?]{}: open {}: BLOCKED (no PID)",
-                                process_name,
+                                real_process_path.display(),
                                 signer_info,
                                 real_file_path.display()
                             );
@@ -424,7 +515,7 @@ impl Monitor {
                         {
                             log::error!(
                                 "{}[{}]: open {}: BLOCKED",
-                                process_name,
+                                real_process_path.display(),
                                 pid_str,
                                 real_file_path.display()
                             );
@@ -437,7 +528,7 @@ impl Monitor {
                             if self.suspend_process(pid) {
                                 log::warn!(
                                     "{}[{}]{}: open {}: SUSPENDED (waiting for user)",
-                                    process_name,
+                                    real_process_path.display(),
                                     pid,
                                     signer_info,
                                     real_file_path.display()
@@ -460,7 +551,7 @@ impl Monitor {
                                 self.resume_process(pid);
                                 log::info!(
                                     "{}[{}]{}: open {}: RESUMED (user allowed)",
-                                    process_name,
+                                    real_process_path.display(),
                                     pid,
                                     signer_info,
                                     real_file_path.display()
@@ -468,7 +559,7 @@ impl Monitor {
                             } else {
                                 log::error!(
                                     "{}[{}]{}: open {}: STOPPED (user denied)",
-                                    process_name,
+                                    real_process_path.display(),
                                     pid,
                                     signer_info,
                                     real_file_path.display()
@@ -528,6 +619,51 @@ impl Monitor {
                 }
             }
             false
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn get_process_cmdline(&self, pid: u32) -> Option<String> {
+        use std::process::Command;
+
+        // Use ps to get command-line arguments
+        match Command::new("ps")
+            .args(["-o", "command=", "-p", &pid.to_string()])
+            .output()
+        {
+            Ok(output) => {
+                if output.status.success() {
+                    let cmdline = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                    if !cmdline.is_empty() {
+                        Some(cmdline)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            }
+            Err(_) => None,
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn get_process_cmdline(&self, pid: u32) -> Option<String> {
+        // On Linux, read from /proc/PID/cmdline
+        use std::fs;
+
+        let cmdline_path = format!("/proc/{}/cmdline", pid);
+        match fs::read_to_string(&cmdline_path) {
+            Ok(cmdline) => {
+                // Replace null bytes with spaces
+                let cmdline = cmdline.replace('\0', " ").trim().to_string();
+                if !cmdline.is_empty() {
+                    Some(cmdline)
+                } else {
+                    None
+                }
+            }
+            Err(_) => None,
         }
     }
 
@@ -707,7 +843,7 @@ impl Monitor {
         log::info!("Using fanotify mechanism");
 
         // Use the Linux-specific monitor implementation
-        let mut linux_monitor = LinuxMonitor::new(self.mode.clone(), self.verbose);
+        let mut linux_monitor = LinuxMonitor::new(self.mode.clone(), self.verbose, self.stop_parent);
         linux_monitor.start().await
     }
 

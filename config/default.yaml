@@ -1,0 +1,315 @@
+# NoSwiper Default Configuration
+# This file is embedded at compile time and provides the default rules
+# Users can override these with ~/.config/noswiper/config.yaml
+
+# Files and patterns to protect
+protected_files:
+  # SSH Keys
+  - pattern: "~/.ssh/id_*"
+    allowed_programs:
+      - ssh
+      - ssh-add
+      - ssh-agent
+      - ssh-keygen
+      - scp
+      - sftp
+      - rsync
+      - git
+      - git-remote-https
+      - gh
+    allowed_signers:
+      - "com.apple.Terminal"
+      - "com.googlecode.iterm2"
+      - "com.microsoft.VSCode"
+      - "dev.warp.Warp"
+
+  - pattern: "~/.ssh/*_key"
+    allowed_programs:
+      - ssh
+      - ssh-add
+      - ssh-agent
+      - ssh-keygen
+      - scp
+      - sftp
+      - rsync
+      - git
+    allowed_signers:
+      - "com.apple.Terminal"
+      - "com.googlecode.iterm2"
+
+  # AWS Credentials
+  - pattern: "~/.aws/credentials"
+    allowed_programs:
+      - aws
+      - terraform
+      - ansible
+      - ansible-playbook
+      - packer
+      - boto
+      - python
+      - python3
+    allowed_signers:
+      - "HashiCorp"  # Terraform team ID
+      - "com.amazon.AWS-CLI"
+
+  - pattern: "~/.aws/config"
+    allowed_programs:
+      - aws
+      - terraform
+      - ansible
+      - packer
+    allowed_signers:
+      - "HashiCorp"
+
+  # Google Cloud
+  - pattern: "~/.config/gcloud/credentials.db"
+    allowed_programs:
+      - gcloud
+      - gsutil
+      - bq
+      - kubectl
+      - python
+      - python3
+      - Python  # macOS Python wrapper
+    allowed_signers:
+      - "EQHXZ8M8AV"  # Google team ID
+      - "com.apple.python3"  # System Python used by gcloud
+
+  - pattern: "~/.config/gcloud/access_tokens.db"
+    allowed_programs:
+      - gcloud
+      - gsutil
+      - bq
+      - python
+      - python3
+      - Python  # macOS Python wrapper
+    allowed_signers:
+      - "EQHXZ8M8AV"  # Google team ID
+      - "com.apple.python3"  # System Python used by gcloud
+
+  # Azure
+  - pattern: "~/.azure/accessTokens.json"
+    allowed_programs:
+      - az
+      - azure-cli
+      - powershell
+    allowed_signers:
+      - "UBF8T346G9"  # Microsoft team ID
+
+  # GPG Keys
+  - pattern: "~/.gnupg/private-keys*"
+    allowed_programs:
+      - gpg
+      - gpg2
+      - gpg-agent
+      - pinentry
+      - pass
+    allowed_signers:
+      - "org.gpgtools.gpg"
+
+  - pattern: "~/.gnupg/secring.gpg"
+    allowed_programs:
+      - gpg
+      - gpg2
+      - gpg-agent
+
+  # Package Manager Credentials
+  - pattern: "~/.npmrc"
+    allowed_programs:
+      - npm
+      - node
+      - yarn
+      - pnpm
+    allowed_signers:
+      - "com.nodejs.node"
+
+  - pattern: "~/.pypirc"
+    allowed_programs:
+      - python
+      - python3
+      - pip
+      - pip3
+      - twine
+
+  - pattern: "~/.cargo/credentials"
+    allowed_programs:
+      - cargo
+      - rustc
+      - rustup
+
+  - pattern: "~/.docker/config.json"
+    allowed_programs:
+      - docker
+      - docker-compose
+      - docker-credential-desktop
+      - Docker
+    allowed_signers:
+      - "com.docker.Docker"
+
+  # Kubernetes
+  - pattern: "~/.kube/config"
+    allowed_programs:
+      - kubectl
+      - helm
+      - k9s
+      - lens
+      - minikube
+    allowed_signers:
+      - "io.k8slens.lens"
+
+  # Browser Password Stores - Firefox
+  - pattern: "~/Library/Application Support/Firefox/Profiles/*/logins.json"
+    allowed_programs:
+      - firefox
+      - Firefox
+    allowed_signers:
+      - "org.mozilla.firefox"
+
+  - pattern: "~/Library/Application Support/Firefox/Profiles/*/key*.db"
+    allowed_programs:
+      - firefox
+      - Firefox
+    allowed_signers:
+      - "org.mozilla.firefox"
+
+  # Browser Password Stores - Chrome
+  - pattern: "~/Library/Application Support/Google/Chrome/*/Login Data"
+    allowed_programs:
+      - "Google Chrome"
+      - chrome
+    allowed_signers:
+      - "com.google.Chrome"
+
+  - pattern: "~/Library/Application Support/Google/Chrome/*/Cookies"
+    allowed_programs:
+      - "Google Chrome"
+      - chrome
+    allowed_signers:
+      - "com.google.Chrome"
+
+  # macOS Keychain
+  - pattern: "~/Library/Keychains/login.keychain-db"
+    allowed_programs:
+      - security
+      - "Keychain Access"
+      - SecurityAgent
+      - codesign
+      - accountsd
+      - sharingd
+      - cloudd
+      - securityd
+      - trustd
+    allowed_signers:
+      # Apple system processes (all have com.apple.* signing IDs)
+      - "com.apple.accountsd"
+      - "com.apple.sharingd"
+      - "com.apple.cloudd"
+      - "com.apple.securityd"
+      - "com.apple.trustd"
+      - "com.apple.SecurityAgent"
+      - "com.apple.security"
+      - "com.apple.codesign"
+      - "com.apple.Safari"
+      # Third-party apps by team ID
+      - "EQHXZ8M8AV"  # Google
+      - "AXL7V72P4Y"  # Dropbox
+      - "2BUA8C4S2C"  # 1Password
+      - "LTZ2PFU5D6"  # Bitwarden
+      - "44U7362S3E"  # LastPass
+      - "6JSW4SJWN9"  # Dashlane
+      - "43AQ936H96"  # Mozilla (Firefox Developer Edition)
+
+  - pattern: "~/Library/Keychains/*.keychain-db"
+    allowed_programs:
+      - security
+      - "Keychain Access"
+      - SecurityAgent
+      - securityd
+    allowed_signers:
+      - "com.apple.security"
+      - "com.apple.SecurityAgent"
+      - "com.apple.securityd"
+      - "43AQ936H96"  # Mozilla (Firefox Developer Edition)
+
+  # Password Managers
+  - pattern: "~/.password-store/**/*.gpg"
+    allowed_programs:
+      - pass
+      - gpg
+      - gpg2
+      - passmenu
+
+  - pattern: "~/Documents/*.kdbx"
+    allowed_programs:
+      - keepassxc
+      - keepassx
+      - keepass2
+      - kpcli
+    allowed_signers:
+      - "G2S7R7PVXJ"  # KeePassXC team ID
+
+  - pattern: "~/Library/Application Support/Bitwarden/data.json"
+    allowed_programs:
+      - Bitwarden
+      - bitwarden
+    allowed_signers:
+      - "LTZ2PFU5D6"  # Bitwarden team ID
+
+# Patterns to exclude from monitoring (reduce noise)
+excluded_patterns:
+  - "*.pub"           # Public keys
+  - "*.public"        # Public files
+  - "*/.git/*"        # Git internals
+  - "*/node_modules/*" # Node modules
+  - "*/__pycache__/*" # Python cache
+  - "*/target/*"      # Rust/Cargo build
+  - "*.log"           # Log files
+  - "*.tmp"           # Temporary files
+
+# Platform-specific allowed paths for executables
+allowed_paths:
+  macos:
+    - /usr/bin
+    - /bin
+    - /usr/sbin
+    - /sbin
+    - /System/Library
+    - /usr/local/bin
+    - /usr/local/sbin
+    - /opt/homebrew/bin
+    - /opt/homebrew/sbin
+    - /Applications/*/Contents/MacOS
+    - ~/Applications/*/Contents/MacOS
+    - /System/Applications/*/Contents/MacOS
+
+  linux:
+    - /usr/bin
+    - /bin
+    - /usr/sbin
+    - /sbin
+    - /usr/local/bin
+    - /usr/local/sbin
+    - /opt/*/bin
+    - /snap/bin
+    - /var/lib/flatpak/exports/bin
+    - ~/.local/bin
+
+# Global allow rules based on signing (macOS only)
+# These signers are trusted for any protected file
+global_trusted_signers:
+  - "com.apple.security"      # Apple's security tools
+  - "com.apple.SecurityAgent"  # Apple's security agent
+  - "Developer ID Application: Microsoft Corporation" # VS Code and other MS tools
+
+# Monitoring configuration
+monitoring:
+  # Paths to monitor (Linux fanotify)
+  watch_paths:
+    - /home
+    - /root
+
+  # Event buffer size
+  buffer_size: 8192
+
+  # Maximum events per second (rate limiting)
+  max_events_per_sec: 10000

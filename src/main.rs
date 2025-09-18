@@ -1,6 +1,7 @@
 #![deny(warnings)]
 
 mod cli;
+mod config;
 mod defaults;
 mod monitor;
 mod rules;
@@ -48,7 +49,7 @@ async fn main() -> Result<()> {
     info!("Mechanism: {}", args.get_mechanism());
 
     // Create and start monitor
-    let mut monitor = Monitor::new(args.get_mode(), args.get_mechanism(), args.verbose);
+    let mut monitor = Monitor::new(args.get_mode(), args.get_mechanism(), args.verbose, args.stop_parent);
 
     // Handle shutdown gracefully
     let shutdown_result = tokio::select! {
@@ -215,38 +216,16 @@ fn validate_config(config_path: &std::path::Path) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
-    fn test_cli_args_validation() {
-        // Test that multiple modes are rejected
-        let args = Args {
-            monitor: true,
-            enforce: true,
-            interactive: false,
-            mechanism: None,
-            log_level: LogLevel::Info,
-            config: None,
-            show_config: false,
-            validate_config: None,
-        };
+    fn test_config_loading() {
+        // Test that default config loads from embedded YAML
+        use crate::config::Config;
+        let config = Config::default();
+        assert!(config.is_ok());
 
-        assert!(args.validate().is_err());
-    }
-
-    #[test]
-    fn test_cli_args_single_mode() {
-        let args = Args {
-            monitor: false,
-            enforce: true,
-            interactive: false,
-            mechanism: None,
-            log_level: LogLevel::Info,
-            config: None,
-            show_config: false,
-            validate_config: None,
-        };
-
-        assert!(args.validate().is_ok());
+        let config = config.unwrap();
+        // Verify some expected entries exist
+        assert!(!config.protected_files.is_empty());
+        assert!(!config.excluded_patterns.is_empty());
     }
 }

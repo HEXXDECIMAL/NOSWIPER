@@ -1,7 +1,8 @@
-use std::collections::HashMap;
+// This file is deprecated - all rules are now in config/default.yaml
+// Keeping minimal structure for backward compatibility during transition
 
 /// Default protected credential patterns and their allowed programs
-/// Format: (glob_pattern, [allowed_program_names])
+/// DEPRECATED: Use config/default.yaml instead
 pub const DEFAULT_PROTECTED: &[(&str, &[&str])] = &[
     // SSH Keys
     (
@@ -138,12 +139,62 @@ pub const DEFAULT_PROTECTED: &[(&str, &[&str])] = &[
         &["gnome-keyring-daemon", "seahorse", "secret-tool"],
     ),
     (
+        "~/Library/Keychains/login.keychain-db",
+        &[
+            "security",
+            "Keychain Access",
+            "SecurityAgent",
+            "codesign",
+            "accountsd",      // Apple account management
+            "sharingd",       // Apple sharing services
+            "cloudd",         // iCloud services
+            "Safari",         // Safari browser
+            "Google Chrome",  // Google Chrome browser
+            "Google Drive",   // Google Drive sync
+            "Dropbox",        // Dropbox sync
+            "1Password",      // Password managers
+            "Bitwarden",
+            "LastPass",
+            "Dashlane",
+            "securityd",      // macOS security daemon
+            "trustd",         // Certificate trust daemon
+        ],
+    ),
+    (
         "~/Library/Keychains/*.keychain-db",
-        &["security", "Keychain Access", "SecurityAgent", "codesign"],
+        &[
+            "security",
+            "Keychain Access",
+            "SecurityAgent",
+            "codesign",
+            "accountsd",      // Apple account management
+            "sharingd",       // Apple sharing services
+            "cloudd",         // iCloud services
+            "Safari",         // Safari browser
+            "Google Chrome",  // Google Chrome browser
+            "Google Drive",   // Google Drive sync
+            "Dropbox",        // Dropbox sync
+            "1Password",      // Password managers
+            "Bitwarden",
+            "LastPass",
+            "Dashlane",
+            "securityd",      // macOS security daemon
+            "trustd",         // Certificate trust daemon
+        ],
     ),
     (
         "~/Library/Keychains/*/keychain-2.db",
-        &["security", "Keychain Access", "SecurityAgent", "codesign"],
+        &[
+            "security",
+            "Keychain Access",
+            "SecurityAgent",
+            "codesign",
+            "accountsd",
+            "sharingd",
+            "cloudd",
+            "securityd",
+            "trustd",
+        ],
     ),
     (
         "~/Documents/*.kdbx",
@@ -193,6 +244,7 @@ pub const MACOS_COMMON_PATHS: &[&str] = &[
 ];
 
 /// Common paths for legitimate programs on Linux
+#[allow(dead_code)]  // Will be removed after full migration
 pub const LINUX_COMMON_PATHS: &[&str] = &[
     // System binaries
     "/usr/bin/*",
@@ -210,28 +262,4 @@ pub const LINUX_COMMON_PATHS: &[&str] = &[
     "/opt/*/bin/*",
 ];
 
-/// Build a lookup table for quick pattern matching
-pub fn build_protection_rules() -> HashMap<String, Vec<String>> {
-    let mut rules = HashMap::new();
-
-    for (pattern, allowed_programs) in DEFAULT_PROTECTED {
-        let expanded_pattern = shellexpand::tilde(pattern).to_string();
-        let programs: Vec<String> = allowed_programs.iter().map(|s| s.to_string()).collect();
-        rules.insert(expanded_pattern, programs);
-    }
-
-    rules
-}
-
-/// Check if a path should be excluded from protection
-pub fn is_excluded_path(path: &str) -> bool {
-    for pattern in EXCLUDED_PATTERNS {
-        let expanded = shellexpand::tilde(pattern);
-        if let Ok(glob_pattern) = glob::Pattern::new(&expanded) {
-            if glob_pattern.matches(path) {
-                return true;
-            }
-        }
-    }
-    false
-}
+// Functions deprecated - use Config methods instead
