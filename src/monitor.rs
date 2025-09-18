@@ -1740,7 +1740,7 @@ impl Monitor {
         println!("  Note: Code signing info available in event logs");
     }
 
-    fn show_process_status(&self, pid: u32) {
+    fn show_process_status(&self, #[allow(unused_variables)] pid: u32) {
         #[cfg(target_os = "macos")]
         {
             println!("  Process Status:");

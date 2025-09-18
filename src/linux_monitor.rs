@@ -5,6 +5,7 @@ use crate::rules::{Decision, RuleEngine};
 use anyhow::Result;
 use nix::libc;
 use std::collections::HashMap;
+use std::io;
 use std::mem;
 use std::path::{Path, PathBuf};
 
@@ -318,7 +319,7 @@ impl LinuxMonitor {
         use crate::process_context::ProcessContext;
         let context = ProcessContext {
             path: process_path.clone(),
-            pid: Some(metadata.pid),
+            pid: Some(metadata.pid as u32),
             ppid: None, // TODO: Get parent PID on Linux
             team_id: None, // Not available on Linux
             app_id: None,  // Not available on Linux
