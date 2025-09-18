@@ -17,9 +17,28 @@ pub struct Config {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ProtectedFile {
-    pub pattern: String,
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(flatten)]
+    pub patterns_config: PatternsConfig,
     #[serde(rename = "allow")]
     pub allow_rules: Vec<AllowRule>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum PatternsConfig {
+    Single { pattern: String },
+    Multiple { patterns: Vec<String> },
+}
+
+impl ProtectedFile {
+    pub fn patterns(&self) -> Vec<String> {
+        match &self.patterns_config {
+            PatternsConfig::Single { pattern } => vec![pattern.clone()],
+            PatternsConfig::Multiple { patterns } => patterns.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -42,7 +61,6 @@ pub struct DefaultBasePaths {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct MonitoringConfig {
-    pub watch_paths: Vec<String>,
     pub buffer_size: usize,
     pub max_events_per_sec: usize,
 }

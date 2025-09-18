@@ -36,9 +36,19 @@ global_exclusions:
     ppid: 1
 
 # Files and patterns to protect
+#
+# Note: Patterns with ~ are expanded relative to the daemon's home directory.
+# To protect files in all user home directories, include explicit patterns for:
+# - ~ (daemon's home, typically root when running as service)
+# - /root/* (root user)
+# - /home/* (Linux users)
+# - /Users/* (macOS users)
 protected_files:
   # SSH Keys
-  - pattern: "~/.ssh/id_*"
+  - id: ssh_keys
+    patterns:
+      - "~/.ssh/id_*"
+      - "~/.ssh/*_key"
     allow:
       # SSH tools from system paths only
       - base: "ssh"
@@ -79,28 +89,12 @@ protected_files:
       - team_id: "dev.warp.Warp"
         ppid: 1
 
-  - pattern: "~/.ssh/*_key"
-    allow:
-      # Same as id_* keys
-      - base: "ssh"
-      - base: "ssh-add"
-      - base: "ssh-agent"
-      - base: "ssh-keygen"
-      - base: "scp"
-      - base: "sftp"
-      - base: "rsync"
-      - base: "git"
-
-      # SSH from Homebrew Cellar (versioned paths)
-      - base: "ssh"
-        path_pattern: "/opt/homebrew/Cellar/openssh/*/bin/*"
-
-      # Git from Developer Tools
-      - base: "git"
-        path_pattern: "/Library/Developer/CommandLineTools/usr/bin/*"
 
   # AWS Credentials
-  - pattern: "~/.aws/credentials"
+  - id: aws_credentials
+    patterns:
+      - "~/.aws/credentials"
+      - "~/.aws/config"
     allow:
       # AWS CLI from standard locations
       - base: "aws"
@@ -122,15 +116,11 @@ protected_files:
       - base: "python3"
         path_pattern: "~/.*env/bin/*"
 
-  - pattern: "~/.aws/config"
-    allow:
-      - base: "aws"
-      - team_id: "D38WU7D763"  # HashiCorp (Terraform)
-      - base: "ansible"
-      - base: "packer"
-
   # Google Cloud
-  - pattern: "~/.config/gcloud/credentials.db"
+  - id: gcloud_credentials
+    patterns:
+      - "~/.config/gcloud/credentials.db"
+      - "~/.config/gcloud/access_tokens.db"
     allow:
       # Google Cloud SDK tools
       - base: "gcloud"
@@ -144,18 +134,10 @@ protected_files:
       - base: "Python"  # macOS Python wrapper
         app_id: "com.apple.python3"
 
-  - pattern: "~/.config/gcloud/access_tokens.db"
-    allow:
-      - base: "gcloud"
-      - base: "gsutil"
-      - base: "bq"
-      - base: "python"
-      - base: "python3"
-      - base: "Python"
-        app_id: "com.apple.python3"
-
   # Azure
-  - pattern: "~/.azure/accessTokens.json"
+  - id: azure_credentials
+    patterns:
+      - "~/.azure/accessTokens.json"
     allow:
       - base: "az"
       - base: "azure-cli"
@@ -164,7 +146,10 @@ protected_files:
         team_id: "UBF8T346G9"  # Microsoft
 
   # GPG Keys
-  - pattern: "~/.gnupg/private-keys*"
+  - id: gpg_keys
+    patterns:
+      - "~/.gnupg/private-keys*"
+      - "~/.gnupg/secring.gpg"
     allow:
       - base: "gpg"
       - base: "gpg2"
@@ -172,21 +157,19 @@ protected_files:
       - base: "pinentry*"
       - base: "pass"
 
-  - pattern: "~/.gnupg/secring.gpg"
-    allow:
-      - base: "gpg"
-      - base: "gpg2"
-      - base: "gpg-agent"
-
   # Package Manager Credentials
-  - pattern: "~/.npmrc"
+  - id: npm_credentials
+    patterns:
+      - "~/.npmrc"
     allow:
       - base: "npm"
       - base: "node"
       - base: "yarn"
       - base: "pnpm"
 
-  - pattern: "~/.pypirc"
+  - id: python_credentials
+    patterns:
+      - "~/.pypirc"
     allow:
       - base: "python"
       - base: "python3"
@@ -195,7 +178,9 @@ protected_files:
       - base: "twine"
         path_pattern: "~/.local/bin/*"
 
-  - pattern: "~/.cargo/credentials"
+  - id: cargo_credentials
+    patterns:
+      - "~/.cargo/credentials"
     allow:
       - base: "cargo"
         path_pattern: "~/.cargo/bin/*"
@@ -204,7 +189,9 @@ protected_files:
       - base: "rustup"
         path_pattern: "~/.cargo/bin/*"
 
-  - pattern: "~/.docker/config.json"
+  - id: docker_credentials
+    patterns:
+      - "~/.docker/config.json"
     allow:
       - base: "docker"
       - base: "docker-compose"
@@ -215,7 +202,9 @@ protected_files:
         ppid: 1
 
   # Kubernetes
-  - pattern: "~/.kube/config"
+  - id: kubernetes_config
+    patterns:
+      - "~/.kube/config"
     allow:
       - base: "kubectl"
       - base: "helm"
@@ -226,36 +215,18 @@ protected_files:
         ppid: 1
 
   # Browser Password Stores - Firefox
-  - pattern: "~/Library/Application Support/Firefox/Profiles/*/logins.json"
+  - id: firefox_passwords
+    patterns:
+      - "~/Library/Application Support/Firefox/Profiles/*/logins.json"
+      - "~/Library/Application Support/Firefox/Profiles/*/key*.db"
+      - "~/Library/Application Support/Firefox/Profiles/*/cookies.sqlite"
+      - "~/.mozilla/firefox/*/logins.json"  # Linux
+      - "~/.mozilla/firefox/*/key*.db"  # Linux
+      - "~/.mozilla/firefox/*/cookies.sqlite"  # Linux
     allow:
       # Firefox GUI apps must have ppid=1
       - base: "firefox"
         team_id: "43AQ936H96"  # Mozilla
-        ppid: 1
-      - base: "Firefox"
-        team_id: "43AQ936H96"
-        ppid: 1
-      # Safari import service (system process) - covered by global exclusions
-
-  - pattern: "~/Library/Application Support/Firefox/Profiles/*/key*.db"
-    allow:
-      - base: "firefox"
-        team_id: "43AQ936H96"
-        ppid: 1
-      - base: "Firefox"
-        team_id: "43AQ936H96"
-        ppid: 1
-      - base: "com.apple.Safari.BrowserDataImportingService"
-        app_id: "com.apple.*"
-        path_pattern: "/System/*"
-      # Apple system processes (like mdworker_shared for indexing)
-      - app_id: "com.apple.*"
-        path_pattern: "/System/*"
-
-  - pattern: "~/Library/Application Support/Firefox/Profiles/*/cookies.sqlite"
-    allow:
-      - base: "firefox"
-        team_id: "43AQ936H96"
         ppid: 1
       - base: "Firefox"
         team_id: "43AQ936H96"
@@ -268,55 +239,17 @@ protected_files:
         path_pattern: "/System/*"
 
   # Zen Browser (Firefox-based)
-  - pattern: "~/Library/Application Support/Zen/Profiles/*/logins.json"
+  - id: zen_browser_data
+    patterns:
+      - "~/Library/Application Support/Zen/Profiles/*/logins.json"
+      - "~/Library/Application Support/Zen/Profiles/*/key*.db"
+      - "~/Library/Application Support/Zen/Profiles/*/cookies.sqlite"
+      - "~/Library/Application Support/Zen/Profiles/*/places.sqlite"
+      - "~/Library/Application Support/Zen/Profiles/*/formhistory.sqlite"
+      - "~/Library/Application Support/Zen/Profiles/*/signons.sqlite"
     allow:
       - base: "zen"
         team_id: "9V5K9TP787"  # Zen Browser
-        ppid: 1
-      - base: "Zen"
-        team_id: "9V5K9TP787"
-        ppid: 1
-
-  - pattern: "~/Library/Application Support/Zen/Profiles/*/key*.db"
-    allow:
-      - base: "zen"
-        team_id: "9V5K9TP787"
-        ppid: 1
-      - base: "Zen"
-        team_id: "9V5K9TP787"
-        ppid: 1
-
-  - pattern: "~/Library/Application Support/Zen/Profiles/*/cookies.sqlite"
-    allow:
-      - base: "zen"
-        team_id: "9V5K9TP787"
-        ppid: 1
-      - base: "Zen"
-        team_id: "9V5K9TP787"
-        ppid: 1
-
-  - pattern: "~/Library/Application Support/Zen/Profiles/*/places.sqlite"
-    allow:
-      - base: "zen"
-        team_id: "9V5K9TP787"
-        ppid: 1
-      - base: "Zen"
-        team_id: "9V5K9TP787"
-        ppid: 1
-
-  - pattern: "~/Library/Application Support/Zen/Profiles/*/formhistory.sqlite"
-    allow:
-      - base: "zen"
-        team_id: "9V5K9TP787"
-        ppid: 1
-      - base: "Zen"
-        team_id: "9V5K9TP787"
-        ppid: 1
-
-  - pattern: "~/Library/Application Support/Zen/Profiles/*/signons.sqlite"
-    allow:
-      - base: "zen"
-        team_id: "9V5K9TP787"
         ppid: 1
       - base: "Zen"
         team_id: "9V5K9TP787"
@@ -331,117 +264,78 @@ protected_files:
         team_id: "9V5K9TP787"
         ppid: 1
 
-  # Browser Password Stores - Chrome
-  - pattern: "~/Library/Application Support/Google/Chrome/*/Login Data"
+  # Browser Password Stores - Google Chrome (all variants)
+  - id: chrome_passwords
+    patterns:
+      # Chrome Stable - macOS
+      - "~/Library/Application Support/Google/Chrome/*/Login Data"
+      - "~/Library/Application Support/Google/Chrome/*/Cookies"
+      - "~/Library/Application Support/Google/Chrome/*/Web Data"
+      - "~/Library/Application Support/Google/Chrome/*/History"
+      - "~/Library/Application Support/Google/Chrome/*/Network/Cookies"
+      # Chrome Beta - macOS
+      - "~/Library/Application Support/Google/Chrome Beta/*/Login Data"
+      - "~/Library/Application Support/Google/Chrome Beta/*/Cookies"
+      - "~/Library/Application Support/Google/Chrome Beta/*/Web Data"
+      - "~/Library/Application Support/Google/Chrome Beta/*/History"
+      - "~/Library/Application Support/Google/Chrome Beta/*/Network/Cookies"
+      # Chrome Canary - macOS
+      - "~/Library/Application Support/Google/Chrome Canary/*/Login Data"
+      - "~/Library/Application Support/Google/Chrome Canary/*/Cookies"
+      - "~/Library/Application Support/Google/Chrome Canary/*/Web Data"
+      - "~/Library/Application Support/Google/Chrome Canary/*/History"
+      - "~/Library/Application Support/Google/Chrome Canary/*/Network/Cookies"
+      # Chrome Stable - Linux
+      - "~/.config/google-chrome/*/Login Data"
+      - "~/.config/google-chrome/*/Cookies"
+      - "~/.config/google-chrome/*/Web Data"
+      - "~/.config/google-chrome/*/History"
+      # Chrome Beta - Linux
+      - "~/.config/google-chrome-beta/*/Login Data"
+      - "~/.config/google-chrome-beta/*/Cookies"
+      - "~/.config/google-chrome-beta/*/Web Data"
+      - "~/.config/google-chrome-beta/*/History"
+      # Chrome Dev/Canary - Linux (called 'unstable')
+      - "~/.config/google-chrome-unstable/*/Login Data"
+      - "~/.config/google-chrome-unstable/*/Cookies"
+      - "~/.config/google-chrome-unstable/*/Web Data"
+      - "~/.config/google-chrome-unstable/*/History"
     allow:
       - base: "Google Chrome"
         team_id: "EQHXZ8M8AV"  # Google
         ppid: 1
-
-  - pattern: "~/Library/Application Support/Google/Chrome/*/Cookies"
-    allow:
-      - base: "Google Chrome"
-        team_id: "EQHXZ8M8AV"
-        ppid: 1
-
-  - pattern: "~/Library/Application Support/Google/Chrome/*/Web Data"
-    allow:
-      - base: "Google Chrome"
-        team_id: "EQHXZ8M8AV"
-        ppid: 1
-
-  - pattern: "~/Library/Application Support/Google/Chrome/*/History"
-    allow:
-      - base: "Google Chrome"
-        team_id: "EQHXZ8M8AV"
-        ppid: 1
-
-  - pattern: "~/Library/Application Support/Google/Chrome/*/Network/Cookies"
-    allow:
-      - base: "Google Chrome"
-        team_id: "EQHXZ8M8AV"
-        ppid: 1
-
-  # Chrome Beta
-  - pattern: "~/Library/Application Support/Google/Chrome Beta/*/Login Data"
-    allow:
       - base: "Google Chrome Beta"
         team_id: "EQHXZ8M8AV"
         ppid: 1
-
-  - pattern: "~/Library/Application Support/Google/Chrome Beta/*/Cookies"
-    allow:
-      - base: "Google Chrome Beta"
-        team_id: "EQHXZ8M8AV"
-        ppid: 1
-
-  - pattern: "~/Library/Application Support/Google/Chrome Beta/*/Web Data"
-    allow:
-      - base: "Google Chrome Beta"
-        team_id: "EQHXZ8M8AV"
-        ppid: 1
-
-  - pattern: "~/Library/Application Support/Google/Chrome Beta/*/History"
-    allow:
-      - base: "Google Chrome Beta"
-        team_id: "EQHXZ8M8AV"
-        ppid: 1
-
-  - pattern: "~/Library/Application Support/Google/Chrome Beta/*/Network/Cookies"
-    allow:
-      - base: "Google Chrome Beta"
-        team_id: "EQHXZ8M8AV"
-        ppid: 1
-
-  # Chrome Canary
-  - pattern: "~/Library/Application Support/Google/Chrome Canary/*/Login Data"
-    allow:
       - base: "Google Chrome Canary"
         team_id: "EQHXZ8M8AV"
         ppid: 1
+      # Linux variants
+      - base: "google-chrome"
+      - base: "google-chrome-stable"
+      - base: "google-chrome-beta"
+      - base: "google-chrome-unstable"
+      - base: "chrome"
 
-  - pattern: "~/Library/Application Support/Google/Chrome Canary/*/Cookies"
-    allow:
-      - base: "Google Chrome Canary"
-        team_id: "EQHXZ8M8AV"
-        ppid: 1
-
-  - pattern: "~/Library/Application Support/Google/Chrome Canary/*/Web Data"
-    allow:
-      - base: "Google Chrome Canary"
-        team_id: "EQHXZ8M8AV"
-        ppid: 1
-
-  - pattern: "~/Library/Application Support/Google/Chrome Canary/*/History"
-    allow:
-      - base: "Google Chrome Canary"
-        team_id: "EQHXZ8M8AV"
-        ppid: 1
-
-  - pattern: "~/Library/Application Support/Google/Chrome Canary/*/Network/Cookies"
-    allow:
-      - base: "Google Chrome Canary"
-        team_id: "EQHXZ8M8AV"
-        ppid: 1
-
-  # Chromium
-  - pattern: "~/Library/Application Support/Chromium/*/Login Data"
-    allow:
-      - base: "Chromium"
-        ppid: 1
-
-  - pattern: "~/Library/Application Support/Chromium/*/Cookies"
-    allow:
-      - base: "Chromium"
-        ppid: 1
-
-  - pattern: "~/Library/Application Support/Chromium/*/Web Data"
+  - id: chromium_passwords
+    patterns:
+      - "~/Library/Application Support/Chromium/*/Login Data"
+      - "~/Library/Application Support/Chromium/*/Cookies"
+      - "~/Library/Application Support/Chromium/*/Web Data"
+      - "~/.config/chromium/*/Login Data"  # Linux
+      - "~/.config/chromium/*/Cookies"  # Linux
+      - "~/.config/chromium/*/Web Data"  # Linux
     allow:
       - base: "Chromium"
         ppid: 1
 
   # Email Clients - macOS Mail
-  - pattern: "~/Library/Mail/V*/MailData/Accounts.plist"
+  - id: apple_mail
+    patterns:
+      - "~/Library/Mail/V*/MailData/Accounts.plist"
+      - "~/Library/Mail/V*/MailData/*/MessageData/*"
+      - "~/Library/Accounts/Accounts4.sqlite"
+      - "~/Library/Containers/com.apple.mail/Data/Library/Mail/*"
     allow:
       - base: "Mail"
         app_id: "com.apple.*"
@@ -449,21 +343,6 @@ protected_files:
       - base: "MailService"
         app_id: "com.apple.*"
         path_pattern: "/System/*"
-
-  - pattern: "~/Library/Mail/V*/MailData/*/MessageData/*"
-    allow:
-      - base: "Mail"
-        app_id: "com.apple.*"
-        ppid: 1
-      - base: "MailService"
-        app_id: "com.apple.*"
-        path_pattern: "/System/*"
-
-  - pattern: "~/Library/Accounts/Accounts4.sqlite"
-    allow:
-      - base: "Mail"
-        app_id: "com.apple.*"
-        ppid: 1
       - base: "accountsd"
         app_id: "com.apple.*"
         path_pattern: "/System/*"
@@ -471,23 +350,14 @@ protected_files:
         app_id: "com.apple.*"
         path_pattern: "/System/*"
 
-  - pattern: "~/Library/Containers/com.apple.mail/Data/Library/Mail/*"
-    allow:
-      - base: "Mail"
-        app_id: "com.apple.*"
-        ppid: 1
-
   # Microsoft Outlook
-  - pattern: "~/Library/Group Containers/UBF8T346G9.Office/Outlook/Outlook 15 Profiles/Main Profile/Accounts/*"
+  - id: outlook_mail
+    patterns:
+      - "~/Library/Group Containers/UBF8T346G9.Office/Outlook/Outlook 15 Profiles/Main Profile/Accounts/*"
+      - "~/Library/Group Containers/UBF8T346G9.Office/Outlook/Outlook 15 Profiles/Main Profile/*.olk15Message"
     allow:
       - base: "Microsoft Outlook"
         team_id: "UBF8T346G9"  # Microsoft
-        ppid: 1
-
-  - pattern: "~/Library/Group Containers/UBF8T346G9.Office/Outlook/Outlook 15 Profiles/Main Profile/*.olk15Message"
-    allow:
-      - base: "Microsoft Outlook"
-        team_id: "UBF8T346G9"
         ppid: 1
 
   # Spark Mail
@@ -501,22 +371,17 @@ protected_files:
         ppid: 1
 
   # Thunderbird
-  - pattern: "~/Library/Thunderbird/Profiles/*/logins.json"
+  - id: thunderbird_passwords
+    patterns:
+      - "~/Library/Thunderbird/Profiles/*/logins.json"
+      - "~/Library/Thunderbird/Profiles/*/cookies.sqlite"
+      - "~/Library/Thunderbird/Profiles/*/key*.db"
+      - "~/.thunderbird/*/logins.json"  # Linux
+      - "~/.thunderbird/*/cookies.sqlite"  # Linux
+      - "~/.thunderbird/*/key*.db"  # Linux
     allow:
       - base: "Thunderbird"
         team_id: "43AQ936H96"  # Mozilla
-        ppid: 1
-
-  - pattern: "~/Library/Thunderbird/Profiles/*/cookies.sqlite"
-    allow:
-      - base: "Thunderbird"
-        team_id: "43AQ936H96"
-        ppid: 1
-
-  - pattern: "~/Library/Thunderbird/Profiles/*/key*.db"
-    allow:
-      - base: "Thunderbird"
-        team_id: "43AQ936H96"
         ppid: 1
 
   # Safari Extensions and Data
@@ -604,51 +469,64 @@ protected_files:
         ppid: 1
 
   # Cryptocurrency Wallets
-  - pattern: "~/Library/Application Support/Bitcoin/wallet.dat"
+  - id: crypto_wallets
+    patterns:
+      - "~/Library/Application Support/Bitcoin/wallet.dat"
+      - "~/Library/Application Support/Ethereum/keystore/*"
+      - "~/Library/Application Support/Electrum/wallets/*"
+      - "~/Library/Application Support/exodus/exodus.wallet/*"
+      - "~/Library/Application Support/atomic/Local Storage/leveldb/*"
+      - "/Users/*/Library/Application Support/Bitcoin/wallet.dat"
+      - "/Users/*/Library/Application Support/Ethereum/keystore/*"
+      - "/Users/*/Library/Application Support/Electrum/wallets/*"
+      - "/Users/*/Library/Application Support/exodus/exodus.wallet/*"
+      - "/Users/*/Library/Application Support/atomic/Local Storage/leveldb/*"
+      - "~/.bitcoin/wallet.dat"  # Linux
+      - "~/.ethereum/keystore/*"  # Linux
+      - "~/.electrum/wallets/*"  # Linux
+      - "/home/*/.bitcoin/wallet.dat"
+      - "/home/*/.ethereum/keystore/*"
+      - "/home/*/.electrum/wallets/*"
     allow:
       - base: "Bitcoin-Qt"
         ppid: 1
       - base: "bitcoin-cli"
-
-  - pattern: "~/Library/Application Support/Ethereum/keystore/*"
-    allow:
       - base: "geth"
       - base: "Mist"
         ppid: 1
-
-  - pattern: "~/Library/Application Support/Electrum/wallets/*"
-    allow:
       - base: "Electrum"
         ppid: 1
-
-  - pattern: "~/Library/Application Support/exodus/exodus.wallet/*"
-    allow:
       - base: "Exodus"
         ppid: 1
-
-  - pattern: "~/Library/Application Support/atomic/Local Storage/leveldb/*"
-    allow:
       - base: "Atomic Wallet"
         ppid: 1
 
   # Discord Token
-  - pattern: "~/Library/Application Support/discord/Local Storage/leveldb/*"
+  - id: discord_data
+    patterns:
+      - "~/Library/Application Support/discord/Local Storage/leveldb/*"
+      - "/Users/*/Library/Application Support/discord/Local Storage/leveldb/*"
+      - "~/.config/discord/Local Storage/leveldb/*"  # Linux
+      - "/home/*/.config/discord/Local Storage/leveldb/*"
     allow:
       - base: "Discord"
         team_id: "53Q6R32WPB"  # Discord
         ppid: 1
 
   # Slack
-  - pattern: "~/Library/Application Support/Slack/Cookies"
+  - id: slack_data
+    patterns:
+      - "~/Library/Application Support/Slack/Cookies"
+      - "~/Library/Application Support/Slack/Local Storage/leveldb/*"
+      - "/Users/*/Library/Application Support/Slack/Cookies"
+      - "/Users/*/Library/Application Support/Slack/Local Storage/leveldb/*"
+      - "~/.config/Slack/Cookies"  # Linux
+      - "~/.config/Slack/Local Storage/leveldb/*"  # Linux
+      - "/home/*/.config/Slack/Cookies"
+      - "/home/*/.config/Slack/Local Storage/leveldb/*"
     allow:
       - base: "Slack"
         team_id: "BQR82RAZA8"  # Slack
-        ppid: 1
-
-  - pattern: "~/Library/Application Support/Slack/Local Storage/leveldb/*"
-    allow:
-      - base: "Slack"
-        team_id: "BQR82RAZA8"
         ppid: 1
 
   # Telegram
@@ -660,66 +538,80 @@ protected_files:
         ppid: 1
 
   # Signal
-  - pattern: "~/Library/Application Support/Signal/sql/db.sqlite"
+  - id: signal_data
+    patterns:
+      - "~/Library/Application Support/Signal/sql/db.sqlite"
+      - "~/Library/Application Support/Signal/config.json"
+      - "/Users/*/Library/Application Support/Signal/sql/db.sqlite"
+      - "/Users/*/Library/Application Support/Signal/config.json"
+      - "~/.config/Signal/sql/db.sqlite"  # Linux
+      - "~/.config/Signal/config.json"  # Linux
+      - "/home/*/.config/Signal/sql/db.sqlite"
+      - "/home/*/.config/Signal/config.json"
     allow:
       - base: "Signal"
         team_id: "U68MSDN6DR"  # Signal
         ppid: 1
 
-  - pattern: "~/Library/Application Support/Signal/config.json"
-    allow:
-      - base: "Signal"
-        team_id: "U68MSDN6DR"
-        ppid: 1
-
   # Brave Browser
-  - pattern: "~/Library/Application Support/BraveSoftware/Brave-Browser/*/Login Data"
+  - id: brave_passwords
+    patterns:
+      - "~/Library/Application Support/BraveSoftware/Brave-Browser/*/Login Data"
+      - "~/Library/Application Support/BraveSoftware/Brave-Browser/*/Cookies"
+      - "/Users/*/Library/Application Support/BraveSoftware/Brave-Browser/*/Login Data"
+      - "/Users/*/Library/Application Support/BraveSoftware/Brave-Browser/*/Cookies"
+      - "~/.config/BraveSoftware/Brave-Browser/*/Login Data"  # Linux
+      - "~/.config/BraveSoftware/Brave-Browser/*/Cookies"  # Linux
+      - "/home/*/.config/BraveSoftware/Brave-Browser/*/Login Data"
+      - "/home/*/.config/BraveSoftware/Brave-Browser/*/Cookies"
     allow:
       - base: "Brave Browser"
         team_id: "KL8N8XSYF4"  # Brave
         ppid: 1
 
-  - pattern: "~/Library/Application Support/BraveSoftware/Brave-Browser/*/Cookies"
-    allow:
-      - base: "Brave Browser"
-        team_id: "KL8N8XSYF4"
-        ppid: 1
-
   # Edge Browser
-  - pattern: "~/Library/Application Support/Microsoft Edge/*/Login Data"
+  - id: edge_passwords
+    patterns:
+      - "~/Library/Application Support/Microsoft Edge/*/Login Data"
+      - "~/Library/Application Support/Microsoft Edge/*/Cookies"
+      - "/Users/*/Library/Application Support/Microsoft Edge/*/Login Data"
+      - "/Users/*/Library/Application Support/Microsoft Edge/*/Cookies"
+      - "~/.config/microsoft-edge/*/Login Data"  # Linux
+      - "~/.config/microsoft-edge/*/Cookies"  # Linux
+      - "/home/*/.config/microsoft-edge/*/Login Data"
+      - "/home/*/.config/microsoft-edge/*/Cookies"
     allow:
       - base: "Microsoft Edge"
         team_id: "UBF8T346G9"  # Microsoft
         ppid: 1
 
-  - pattern: "~/Library/Application Support/Microsoft Edge/*/Cookies"
-    allow:
-      - base: "Microsoft Edge"
-        team_id: "UBF8T346G9"
-        ppid: 1
-
   # Opera Browser
-  - pattern: "~/Library/Application Support/com.operasoftware.Opera/Login Data"
+  - id: opera_passwords
+    patterns:
+      - "~/Library/Application Support/com.operasoftware.Opera/Login Data"
+      - "~/Library/Application Support/com.operasoftware.Opera/Cookies"
+      - "/Users/*/Library/Application Support/com.operasoftware.Opera/Login Data"
+      - "/Users/*/Library/Application Support/com.operasoftware.Opera/Cookies"
+      - "~/.config/opera/Login Data"  # Linux
+      - "~/.config/opera/Cookies"  # Linux
+      - "/home/*/.config/opera/Login Data"
+      - "/home/*/.config/opera/Cookies"
     allow:
       - base: "Opera"
         team_id: "A2P9LX4JPN"  # Opera
         ppid: 1
 
-  - pattern: "~/Library/Application Support/com.operasoftware.Opera/Cookies"
-    allow:
-      - base: "Opera"
-        team_id: "A2P9LX4JPN"
-        ppid: 1
-
   # FileZilla
-  - pattern: "~/.config/filezilla/recentservers.xml"
-    allow:
-      - base: "filezilla"
-        ppid: 1
-      - base: "FileZilla"
-        ppid: 1
-
-  - pattern: "~/.config/filezilla/sitemanager.xml"
+  - id: filezilla_servers
+    patterns:
+      - "~/.config/filezilla/recentservers.xml"
+      - "~/.config/filezilla/sitemanager.xml"
+      - "/home/*/.config/filezilla/recentservers.xml"
+      - "/home/*/.config/filezilla/sitemanager.xml"
+      - "~/Library/Application Support/FileZilla/recentservers.xml"  # macOS
+      - "~/Library/Application Support/FileZilla/sitemanager.xml"  # macOS
+      - "/Users/*/Library/Application Support/FileZilla/recentservers.xml"
+      - "/Users/*/Library/Application Support/FileZilla/sitemanager.xml"
     allow:
       - base: "filezilla"
         ppid: 1
@@ -757,20 +649,30 @@ protected_files:
         ppid: 1
 
   # TablePlus
-  - pattern: "~/Library/Application Support/com.tinyapp.TablePlus/Data/Connections.plist"
+  - id: tableplus_connections
+    patterns:
+      - "~/Library/Application Support/com.tinyapp.TablePlus/Data/Connections.plist"
+      - "/Users/*/Library/Application Support/com.tinyapp.TablePlus/Data/Connections.plist"
     allow:
       - base: "TablePlus"
         team_id: "3X57WD8ENQ"  # TablePlus
         ppid: 1
 
   # Sequel Pro
-  - pattern: "~/Library/Application Support/Sequel Pro/Data/Favorites.plist"
+  - id: sequel_pro_connections
+    patterns:
+      - "~/Library/Application Support/Sequel Pro/Data/Favorites.plist"
+      - "/Users/*/Library/Application Support/Sequel Pro/Data/Favorites.plist"
     allow:
       - base: "Sequel Pro"
         ppid: 1
 
   # DBeaver
-  - pattern: "~/.dbeaver/credentials-config.json"
+  - id: dbeaver_connections
+    patterns:
+      - "~/.dbeaver/credentials-config.json"
+      - "/home/*/.dbeaver/credentials-config.json"
+      - "/Users/*/.dbeaver/credentials-config.json"
     allow:
       - base: "dbeaver"
         ppid: 1
@@ -799,130 +701,167 @@ protected_files:
         ppid: 1
 
   # VPN Configurations
-  - pattern: "~/Library/Application Support/Viscosity/OpenVPN/*"
+  - id: vpn_configs
+    patterns:
+      - "~/Library/Application Support/Viscosity/OpenVPN/*"
+      - "/Users/*/Library/Application Support/Viscosity/OpenVPN/*"
+      - "~/Library/Application Support/Tunnelblick/Configurations/*"
+      - "/Users/*/Library/Application Support/Tunnelblick/Configurations/*"
     allow:
       - base: "Viscosity"
         team_id: "34XR7GXFPX"  # SparkLabs
         ppid: 1
-
-  - pattern: "~/Library/Application Support/Tunnelblick/Configurations/*"
-    allow:
       - base: "Tunnelblick"
         ppid: 1
 
+  # FTP/SFTP Clients (keep separate - each should only access own bookmarks)
   # Cyberduck
-  - pattern: "~/Library/Group Containers/G69SCX94XU.duck/Library/Application Support/duck/Bookmarks/*"
+  - id: cyberduck_bookmarks
+    patterns:
+      - "~/Library/Group Containers/G69SCX94XU.duck/Library/Application Support/duck/Bookmarks/*"
+      - "/Users/*/Library/Group Containers/G69SCX94XU.duck/Library/Application Support/duck/Bookmarks/*"
     allow:
       - base: "Cyberduck"
         team_id: "G69SCX94XU"  # iterate
         ppid: 1
 
   # Transmit
-  - pattern: "~/Library/Application Support/Transmit/Favorites/*"
+  - id: transmit_favorites
+    patterns:
+      - "~/Library/Application Support/Transmit/Favorites/*"
+      - "/Users/*/Library/Application Support/Transmit/Favorites/*"
     allow:
       - base: "Transmit"
         team_id: "VE8FC488U5"  # Panic
         ppid: 1
 
+  # Git Clients (keep separate - each should only access own credentials)
   # GitHub Desktop
-  - pattern: "~/Library/Application Support/GitHub Desktop/storage/userData.json"
+  - id: github_desktop_accounts
+    patterns:
+      - "~/Library/Application Support/GitHub Desktop/storage/userData.json"
+      - "/Users/*/Library/Application Support/GitHub Desktop/storage/userData.json"
     allow:
       - base: "GitHub Desktop"
         team_id: "VEKTX9H2N7"  # GitHub
         ppid: 1
 
   # SourceTree
-  - pattern: "~/Library/Application Support/SourceTree/accounts.json"
+  - id: sourcetree_accounts
+    patterns:
+      - "~/Library/Application Support/SourceTree/accounts.json"
+      - "/Users/*/Library/Application Support/SourceTree/accounts.json"
     allow:
       - base: "SourceTree"
         team_id: "UPXU4CQZ5P"  # Atlassian
         ppid: 1
 
   # GitKraken
-  - pattern: "~/.gitkraken/profiles/*"
+  - id: gitkraken_profiles
+    patterns:
+      - "~/.gitkraken/profiles/*"
+      - "/home/*/.gitkraken/profiles/*"
+      - "/Users/*/.gitkraken/profiles/*"
     allow:
       - base: "GitKraken"
         team_id: "HV6GQZR9ZK"  # Axosoft
         ppid: 1
 
   # Shell History Files
-  - pattern: "~/.bash_history"
+  - id: shell_history
+    patterns:
+      # Bash
+      - "~/.bash_history"
+      - "/home/*/.bash_history"
+      - "/Users/*/.bash_history"
+      - "/root/.bash_history"
+      # Zsh
+      - "~/.zsh_history"
+      - "/home/*/.zsh_history"
+      - "/Users/*/.zsh_history"
+      - "/root/.zsh_history"
+      # C shell
+      - "~/.history"
+      - "/home/*/.history"
+      - "/Users/*/.history"
+      # Fish
+      - "~/.fish_history"
+      - "~/.local/share/fish/fish_history"
+      - "/home/*/.fish_history"
+      - "/home/*/.local/share/fish/fish_history"
+      - "/Users/*/.local/share/fish/fish_history"
+      # PowerShell
+      - "~/.local/share/powershell/PSReadLine/ConsoleHost_history.txt"
+      - "/home/*/.local/share/powershell/PSReadLine/ConsoleHost_history.txt"
+      - "/Users/*/.local/share/powershell/PSReadLine/ConsoleHost_history.txt"
     allow:
       - base: "bash"
       - base: "sh"
-
-  - pattern: "~/.zsh_history"
-    allow:
       - base: "zsh"
-      - base: "sh"
-
-  - pattern: "~/.history"
-    allow:
       - base: "csh"
       - base: "tcsh"
-      - base: "sh"
-
-  - pattern: "~/.fish_history"
-    allow:
       - base: "fish"
-
-  - pattern: "~/.local/share/fish/fish_history"
-    allow:
-      - base: "fish"
-      # Temporary debug: explicit path for Homebrew fish
-      - path: "/opt/homebrew/Cellar/fish/3.7.1/bin/fish"
-
-  # PowerShell History
-  - pattern: "~/.local/share/powershell/PSReadLine/ConsoleHost_history.txt"
-    allow:
       - base: "pwsh"
       - base: "powershell"
         path_pattern: "/usr/local/microsoft/powershell/*/pwsh"
         team_id: "UBF8T346G9"  # Microsoft
+      # Homebrew paths for shells
+      - base: "fish"
+        path_pattern: "/opt/homebrew/Cellar/fish/*/bin/fish"
 
   # Environment files
-  - pattern: "~/.env"
+  - id: env_files
+    patterns:
+      - "~/.env"
+      - "~/*/.env"
+      - "~/*/.env.*"  # Covers .env.local, .env.production, etc.
+      - "/home/*/.env"
+      - "/home/*/.env.*"
+      - "/Users/*/.env"
+      - "/Users/*/.env.*"
+      - "/root/.env"
+      - "/root/*/.env"
+      - "/root/*/.env.*"
     allow:
       # VS Code
       - base: "code"
         team_id: "UBF8T346G9"  # Microsoft
+        ppid: 1
       # Command-line editors
       - base: "vim"
       - base: "nvim"
       - base: "emacs"
       - base: "nano"
-
-  - pattern: "~/*/.env"
-    allow:
-      - base: "code"
-        team_id: "UBF8T346G9"
-      - base: "vim"
-      - base: "nvim"
+      # Runtimes that need env vars
       - base: "node"
       - base: "python"
       - base: "python3"
-
-  - pattern: "~/*/.env.local"
-    allow:
-      - base: "code"
-        team_id: "UBF8T346G9"
-      - base: "vim"
-      - base: "nvim"
-      - base: "node"
-      - base: "python"
-      - base: "python3"
+      - base: "ruby"
+      - base: "php"
+      # Docker
+      - base: "docker"
+      - base: "docker-compose"
 
   # GitHub CLI
-  - pattern: "~/.config/gh/hosts.yml"
+  - id: github_cli
+    patterns:
+      - "~/.config/gh/hosts.yml"
+      - "/home/*/.config/gh/hosts.yml"
+      - "/Users/*/.config/gh/hosts.yml"
+      - "/root/.config/gh/hosts.yml"
     allow:
       - base: "gh"
-
       # GitHub CLI from Homebrew Cellar (versioned paths)
       - base: "gh"
         path_pattern: "/opt/homebrew/Cellar/gh/*/bin/*"
 
   # Network authentication files
-  - pattern: "~/.netrc"
+  - id: netrc_files
+    patterns:
+      - "~/.netrc"
+      - "/home/*/.netrc"
+      - "/Users/*/.netrc"
+      - "/root/.netrc"
     allow:
       # Cloud CLIs
       - base: "heroku"
@@ -943,7 +882,12 @@ protected_files:
       - base: "nano"
 
   # Netlify CLI
-  - pattern: "~/.netlify/config.json"
+  - id: netlify_config
+    patterns:
+      - "~/.netlify/config.json"
+      - "/home/*/.netlify/config.json"
+      - "/Users/*/.netlify/config.json"
+      - "/root/.netlify/config.json"
     allow:
       - base: "netlify"
       - base: "ntl"
@@ -961,49 +905,6 @@ protected_files:
       - base: "seahorse"
       - base: "secret-tool"
 
-  - pattern: "~/.config/google-chrome/*/Login Data"
-    allow:
-      - base: "chrome"
-      - base: "google-chrome"
-      - base: "google-chrome-stable"
-
-  - pattern: "~/.config/google-chrome/*/Cookies"
-    allow:
-      - base: "chrome"
-      - base: "google-chrome"
-      - base: "google-chrome-stable"
-
-  # Chrome Beta on Linux
-  - pattern: "~/.config/google-chrome-beta/*/Login Data"
-    allow:
-      - base: "chrome-beta"
-      - base: "google-chrome-beta"
-
-  - pattern: "~/.config/google-chrome-beta/*/Cookies"
-    allow:
-      - base: "chrome-beta"
-      - base: "google-chrome-beta"
-
-  - pattern: "~/.config/google-chrome-beta/*/Web Data"
-    allow:
-      - base: "chrome-beta"
-      - base: "google-chrome-beta"
-
-  # Chrome Dev/Canary on Linux (called 'unstable')
-  - pattern: "~/.config/google-chrome-unstable/*/Login Data"
-    allow:
-      - base: "chrome-unstable"
-      - base: "google-chrome-unstable"
-
-  - pattern: "~/.config/google-chrome-unstable/*/Cookies"
-    allow:
-      - base: "chrome-unstable"
-      - base: "google-chrome-unstable"
-
-  - pattern: "~/.config/google-chrome-unstable/*/Web Data"
-    allow:
-      - base: "chrome-unstable"
-      - base: "google-chrome-unstable"
 
   - pattern: "~/.mozilla/firefox/*/logins.json"
     allow:
@@ -1258,11 +1159,6 @@ default_base_paths:
 
 # Monitoring configuration
 monitoring:
-  # Paths to monitor (Linux fanotify)
-  watch_paths:
-    - /home
-    - /root
-
   # Event buffer size
   buffer_size: 8192
 

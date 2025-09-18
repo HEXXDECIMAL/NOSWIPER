@@ -76,5 +76,35 @@ impl ProcessContext {
         self.uid = Some(uid);
         self
     }
+}
 
+/// Get home directory for a given UID
+pub fn get_home_for_uid(uid: u32) -> Option<PathBuf> {
+    #[cfg(unix)]
+    {
+        use std::ffi::CStr;
+        use std::os::unix::ffi::OsStringExt;
+
+        unsafe {
+            let pwd = libc::getpwuid(uid);
+            if pwd.is_null() {
+                return None;
+            }
+
+            let home_dir = (*pwd).pw_dir;
+            if home_dir.is_null() {
+                return None;
+            }
+
+            let home_cstr = CStr::from_ptr(home_dir);
+            let home_bytes = home_cstr.to_bytes();
+            let home_osstring = std::ffi::OsString::from_vec(home_bytes.to_vec());
+            Some(PathBuf::from(home_osstring))
+        }
+    }
+
+    #[cfg(not(unix))]
+    {
+        None
+    }
 }

@@ -198,6 +198,7 @@ impl LinuxMonitor {
             .ok_or_else(|| anyhow::anyhow!("Fanotify not initialized"))?;
 
         // Get home directory for current users
+        // TODO: Periodically refresh watches to detect newly created secret files
         let mut credential_paths = self.get_credential_paths();
 
         log::info!(
@@ -239,6 +240,15 @@ impl LinuxMonitor {
 
         if self.watched_paths.is_empty() {
             return Err(anyhow::anyhow!("No paths could be monitored"));
+        }
+
+        // Log all watched paths in sorted order for easy diffing
+        let mut watched_sorted = self.watched_paths.clone();
+        watched_sorted.sort();
+
+        log::info!("Monitoring {} paths:", watched_sorted.len());
+        for path in &watched_sorted {
+            log::info!("  - {}", path.display());
         }
 
         Ok(())

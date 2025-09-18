@@ -25,6 +25,7 @@ chrono = { version = "0.4", features = ["serde"] }
 anyhow = "1.0"
 tokio = { version = "1", features = ["full"] }
 libc = "0.2"
+lazy_static = "1.4"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # No additional dependencies needed for eslogger approach
