@@ -4,7 +4,7 @@
 BINARY_NAME = noswiper-agent
 OUT_DIR = out
 
-.PHONY: all build release clean monitor test lint help
+.PHONY: all build release clean monitor enforce test lint help
 
 # Default target
 all: build
@@ -17,6 +17,7 @@ help: ## Show this help
 	@echo "  build     - Build debug binary"
 	@echo "  release   - Build release binary"
 	@echo "  monitor   - Build and run in monitor mode (requires sudo)"
+	@echo "  enforce   - Build and run in enforce mode (requires sudo)"
 	@echo "  test      - Run tests"
 	@echo "  lint      - Run linters"
 	@echo "  clean     - Clean build artifacts"
@@ -32,6 +33,10 @@ release: $(OUT_DIR) ## Build release binary
 monitor: build ## Build and run in monitor mode
 	@echo "Starting in monitor mode (requires sudo)..."
 	sudo target/debug/$(BINARY_NAME) --monitor
+
+enforce: build ## Build and run in enforce mode
+	@echo "Starting in enforce mode (requires sudo)..."
+	sudo target/debug/$(BINARY_NAME) --enforce
 
 test: ## Run tests
 	cargo test

