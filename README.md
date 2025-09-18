@@ -92,6 +92,7 @@ Requires Rust 1.70+. The Makefile handles the rest:
 make          # Debug build
 make release  # Optimized build
 make monitor  # Build and run in monitor mode
+make enforce  # Build and run in enforce mode
 ```
 
 ## Configuration
@@ -111,4 +112,8 @@ Key concepts:
 - Firefox shows as lowercase "firefox" not "Firefox"
 - No GUI, CLI only
 - Config changes require recompiling
+
+## License
+
+GPL 3.0
 

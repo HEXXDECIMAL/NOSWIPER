@@ -100,7 +100,7 @@ impl RuleEngine {
                             context.uid,
                             Some(&self.config),
                         ) {
-                            log::info!("Process allowed by allow rule");
+                            log::debug!("Process allowed by allow rule");
                             return Decision::Allow;
                         }
                     }
