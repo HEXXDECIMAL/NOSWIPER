@@ -1175,7 +1175,7 @@ default_base_paths:
     - /opt/homebrew/Cellar/*/bin
     - /opt/homebrew/Cellar/*/sbin
     - /Applications/*/Contents/MacOS
-    - /Applications/Additions/*/Contents/MacOS
+    - /Applications/*/*/Contents/MacOS
     - ~/Applications/*/Contents/MacOS
     - /System/Applications/*/Contents/MacOS
     - /System/Volumes/Preboot/Cryptexes/App/System/Applications/*/Contents/XPCServices/*/Contents/MacOS

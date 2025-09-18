@@ -71,7 +71,7 @@ impl AllowRule {
                 .unwrap_or("");
 
             if actual_basename != expected_basename {
-                log::warn!("Rule failed: basename mismatch. Expected '{}', got '{}'", expected_basename, actual_basename);
+                log::debug!("Rule failed: basename mismatch. Expected '{}', got '{}'", expected_basename, actual_basename);
                 return false;
             }
         }
@@ -80,14 +80,14 @@ impl AllowRule {
         if let Some(ref pattern) = self.path_pattern {
             let path_str = process_path.to_string_lossy();
             if !matches_pattern(pattern, &path_str) {
-                log::warn!("Rule failed: path pattern '{}' doesn't match '{}'", pattern, path_str);
+                log::debug!("Rule failed: path pattern '{}' doesn't match '{}'", pattern, path_str);
                 return false;
             }
         } else if self.base.is_some() && self.path_pattern.is_none() {
             // If base is specified but no path_pattern, check against default paths
             if let Some(cfg) = config {
                 if !cfg.is_allowed_path(process_path) {
-                    log::warn!("Rule failed: basename specified but process path '{}' not in default base paths", process_path.display());
+                    log::debug!("Rule failed: basename specified but process path '{}' not in default base paths", process_path.display());
                     return false;
                 }
             }
@@ -96,7 +96,7 @@ impl AllowRule {
         // Check ppid
         if let Some(expected_ppid) = self.ppid {
             if ppid != Some(expected_ppid) {
-                log::warn!("Rule failed: ppid mismatch. Expected {}, got {:?}", expected_ppid, ppid);
+                log::debug!("Rule failed: ppid mismatch. Expected {}, got {:?}", expected_ppid, ppid);
                 return false;
             }
         }
@@ -106,12 +106,12 @@ impl AllowRule {
             match team_id {
                 Some(actual_team_id) => {
                     if !matches_pattern(expected_team_id, actual_team_id) {
-                        log::warn!("Rule failed: team_id pattern '{}' doesn't match '{}'", expected_team_id, actual_team_id);
+                        log::debug!("Rule failed: team_id pattern '{}' doesn't match '{}'", expected_team_id, actual_team_id);
                         return false;
                     }
                 }
                 None => {
-                    log::warn!("Rule failed: expected team_id '{}' but none provided", expected_team_id);
+                    log::debug!("Rule failed: expected team_id '{}' but none provided", expected_team_id);
                     return false;
                 }
             }
@@ -122,12 +122,12 @@ impl AllowRule {
             match app_id {
                 Some(actual_app_id) => {
                     if !matches_pattern(expected_app_id, actual_app_id) {
-                        log::warn!("Rule failed: app_id pattern '{}' doesn't match '{}'", expected_app_id, actual_app_id);
+                        log::debug!("Rule failed: app_id pattern '{}' doesn't match '{}'", expected_app_id, actual_app_id);
                         return false;
                     }
                 }
                 None => {
-                    log::warn!("Rule failed: expected app_id '{}' but none provided", expected_app_id);
+                    log::debug!("Rule failed: expected app_id '{}' but none provided", expected_app_id);
                     return false;
                 }
             }
@@ -139,12 +139,12 @@ impl AllowRule {
                 Some(actual_args) => {
                     let args_str = actual_args.join(" ");
                     if !matches_pattern(pattern, &args_str) {
-                        log::warn!("Rule failed: args pattern '{}' doesn't match '{}'", pattern, args_str);
+                        log::debug!("Rule failed: args pattern '{}' doesn't match '{}'", pattern, args_str);
                         return false;
                     }
                 }
                 None => {
-                    log::warn!("Rule failed: expected args pattern '{}' but no args provided", pattern);
+                    log::debug!("Rule failed: expected args pattern '{}' but no args provided", pattern);
                     return false;
                 }
             }
@@ -153,7 +153,7 @@ impl AllowRule {
         // Check uid
         if let Some(expected_uid) = self.uid {
             if uid != Some(expected_uid) {
-                log::warn!("Rule failed: uid mismatch. Expected {}, got {:?}", expected_uid, uid);
+                log::debug!("Rule failed: uid mismatch. Expected {}, got {:?}", expected_uid, uid);
                 return false;
             }
         }
