@@ -77,13 +77,4 @@ impl ProcessContext {
         self
     }
 
-    /// Get a display string for signing info
-    pub fn signing_info_display(&self) -> String {
-        match (&self.app_id, &self.team_id) {
-            (Some(aid), Some(tid)) => format!("{} [{}]", aid, tid),
-            (Some(aid), None) => aid.clone(),
-            (None, Some(tid)) => format!("[{}]", tid),
-            (None, None) => String::new(),
-        }
-    }
 }

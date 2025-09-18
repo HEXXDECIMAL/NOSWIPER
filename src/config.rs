@@ -8,6 +8,8 @@ const DEFAULT_CONFIG_YAML: &str = include_str!("../config/default.yaml");
 pub struct Config {
     pub protected_files: Vec<ProtectedFile>,
     pub excluded_patterns: Vec<String>,
+    #[serde(default)]
+    pub global_exclusions: Vec<AllowRule>,
     #[serde(alias = "allowed_paths")]  // For backward compatibility
     pub default_base_paths: DefaultBasePaths,
     pub monitoring: MonitoringConfig,
@@ -16,17 +18,7 @@ pub struct Config {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ProtectedFile {
     pub pattern: String,
-
-    /// Legacy: Simple allowed programs list (backwards compatibility)
-    #[serde(default)]
-    pub allowed_programs: Vec<String>,
-
-    /// Legacy: Simple allowed signers list (backwards compatibility)
-    #[serde(default)]
-    pub allowed_signers: Vec<String>,
-
-    /// New: Flexible allow rules with AND/OR logic
-    #[serde(default, rename = "allow")]
+    #[serde(rename = "allow")]
     pub allow_rules: Vec<AllowRule>,
 }
 
@@ -72,37 +64,6 @@ impl Config {
         Ok(user_config)
     }
 
-    /// Get allowed programs for a given file pattern
-    #[allow(dead_code)]  // API method for future use
-    pub fn get_allowed_programs(&self, file_path: &str) -> Vec<String> {
-        let mut allowed = Vec::new();
-
-        for protected in &self.protected_files {
-            if self.matches_pattern(&protected.pattern, file_path) {
-                allowed.extend(protected.allowed_programs.clone());
-            }
-        }
-
-        allowed.sort();
-        allowed.dedup();
-        allowed
-    }
-
-    /// Get allowed signers for a given file pattern
-    #[allow(dead_code)]  // API method for future use
-    pub fn get_allowed_signers(&self, file_path: &str) -> Vec<String> {
-        let mut allowed = Vec::new();
-
-        for protected in &self.protected_files {
-            if self.matches_pattern(&protected.pattern, file_path) {
-                allowed.extend(protected.allowed_signers.clone());
-            }
-        }
-
-        allowed.sort();
-        allowed.dedup();
-        allowed
-    }
 
     /// Check if a file matches a pattern (with glob support)
     fn matches_pattern(&self, pattern: &str, file_path: &str) -> bool {

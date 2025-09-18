@@ -456,10 +456,22 @@ impl Monitor {
             .map(|s| format!(" [{}]", s))
             .unwrap_or_default();
 
+        // Create process context for exec event checking
+        use crate::process_context::ProcessContext;
+        let context = ProcessContext {
+            path: real_process_path.clone(),
+            pid,
+            ppid,
+            team_id: None, // TODO: Parse from signing_info
+            app_id: None,  // TODO: Parse from signing_info
+            args: None,    // TODO: Get command-line args
+            uid: None,     // TODO: Get user ID
+        };
+
         // Check if this process is allowed to access the protected path
         let decision = self
             .rule_engine
-            .check_access(&real_process_path, &real_protected_path, signing_info.as_deref());
+            .check_access_with_context(&context, &real_protected_path);
 
         match decision {
             Decision::Allow => {
@@ -703,10 +715,23 @@ impl Monitor {
 
         // Protected file access detected - will check rules
 
-        // Check if access is allowed
+        // Create process context for the new rule system
+        use crate::process_context::ProcessContext;
+        let context = ProcessContext {
+            path: real_process_path.clone(),
+            pid,
+            ppid,
+            team_id: None, // TODO: Parse from signing_info
+            app_id: None,  // TODO: Parse from signing_info
+            args: None,    // TODO: Get command-line args
+            uid: None,     // TODO: Get user ID
+        };
+
+        // Check if access is allowed using new context-aware method
         let decision = self
             .rule_engine
-            .check_access(&real_process_path, &real_file_path, signing_info.as_deref());
+            .check_access_with_context(&context, &real_file_path);
+
 
         match decision {
             Decision::Allow => {

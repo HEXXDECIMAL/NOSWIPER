@@ -2,6 +2,39 @@
 # This file is embedded at compile time and provides the default rules
 # Users can override these with ~/.config/noswiper/config.yaml
 
+# Global exclusions - processes that can access ANY protected file
+global_exclusions:
+  # Apple system processes from /System/* (like mdworker_shared, Safari services, etc.)
+  - app_id: "com.apple.*"
+    path_pattern: "/System/*"
+    ppid: 1
+
+  # Popular backup programs (GUI apps must have ppid=1)
+  - base: "syncthing"
+    ppid: 1
+  - base: "rsyncd"  # System daemon, no ppid restriction
+  - base: "rsync"   # Command-line tool, no ppid restriction
+  - base: "Time Machine"
+    app_id: "com.apple.*"
+    ppid: 1
+  - base: "backupd"
+    app_id: "com.apple.*"
+    ppid: 1
+
+  # Popular cloud sync services (GUI apps must have ppid=1)
+  - base: "Dropbox"
+    team_id: "G7HH3F8CAK"  # Dropbox
+    ppid: 1
+  - base: "Google Drive"
+    team_id: "EQHXZ8M8AV"  # Google
+    ppid: 1
+  - base: "OneDrive"
+    team_id: "UBF8T346G9"  # Microsoft
+    ppid: 1
+  - base: "Box Sync"
+    team_id: "M5N3QRBRRR"  # Box
+    ppid: 1
+
 # Files and patterns to protect
 protected_files:
   # SSH Keys
@@ -202,9 +235,7 @@ protected_files:
       - base: "Firefox"
         team_id: "43AQ936H96"
         ppid: 1
-      # Safari import service (system process)
-      - base: "com.apple.Safari.BrowserDataImportingService"
-        app_id: "com.apple.*"
+      # Safari import service (system process) - covered by global exclusions
 
   - pattern: "~/Library/Application Support/Firefox/Profiles/*/key*.db"
     allow:
@@ -216,6 +247,10 @@ protected_files:
         ppid: 1
       - base: "com.apple.Safari.BrowserDataImportingService"
         app_id: "com.apple.*"
+        path_pattern: "/System/*"
+      # Apple system processes (like mdworker_shared for indexing)
+      - app_id: "com.apple.*"
+        path_pattern: "/System/*"
 
   - pattern: "~/Library/Application Support/Firefox/Profiles/*/cookies.sqlite"
     allow:
@@ -227,6 +262,10 @@ protected_files:
         ppid: 1
       - base: "com.apple.Safari.BrowserDataImportingService"
         app_id: "com.apple.*"
+        path_pattern: "/System/*"
+      # Apple system processes (like mdworker_shared for indexing)
+      - app_id: "com.apple.*"
+        path_pattern: "/System/*"
 
   # Zen Browser (Firefox-based)
   - pattern: "~/Library/Application Support/Zen/Profiles/*/logins.json"
@@ -409,6 +448,7 @@ protected_files:
         ppid: 1
       - base: "MailService"
         app_id: "com.apple.*"
+        path_pattern: "/System/*"
 
   - pattern: "~/Library/Mail/V*/MailData/*/MessageData/*"
     allow:
@@ -417,6 +457,7 @@ protected_files:
         ppid: 1
       - base: "MailService"
         app_id: "com.apple.*"
+        path_pattern: "/System/*"
 
   - pattern: "~/Library/Accounts/Accounts4.sqlite"
     allow:
@@ -425,8 +466,10 @@ protected_files:
         ppid: 1
       - base: "accountsd"
         app_id: "com.apple.*"
+        path_pattern: "/System/*"
       - base: "SecurityAgent"
         app_id: "com.apple.*"
+        path_pattern: "/System/*"
 
   - pattern: "~/Library/Containers/com.apple.mail/Data/Library/Mail/*"
     allow:
@@ -484,6 +527,7 @@ protected_files:
         ppid: 1
       - base: "SafariServices"
         app_id: "com.apple.*"
+        path_pattern: "/System/*"
 
   - pattern: "~/Library/Safari/Databases/*"
     allow:
@@ -492,6 +536,7 @@ protected_files:
         ppid: 1
       - base: "SafariServices"
         app_id: "com.apple.*"
+        path_pattern: "/System/*"
 
   # macOS Keychain - Most permissive since many apps need it
   - pattern: "~/Library/Keychains/login.keychain-db"
@@ -824,6 +869,8 @@ protected_files:
   - pattern: "~/.local/share/fish/fish_history"
     allow:
       - base: "fish"
+      # Temporary debug: explicit path for Homebrew fish
+      - path: "/opt/homebrew/Cellar/fish/3.7.1/bin/fish"
 
   # PowerShell History
   - pattern: "~/.local/share/powershell/PSReadLine/ConsoleHost_history.txt"
@@ -1128,8 +1175,10 @@ default_base_paths:
     - /opt/homebrew/Cellar/*/bin
     - /opt/homebrew/Cellar/*/sbin
     - /Applications/*/Contents/MacOS
+    - /Applications/Additions/*/Contents/MacOS
     - ~/Applications/*/Contents/MacOS
     - /System/Applications/*/Contents/MacOS
+    - /System/Volumes/Preboot/Cryptexes/App/System/Applications/*/Contents/XPCServices/*/Contents/MacOS
 
   linux:
     - /usr/bin

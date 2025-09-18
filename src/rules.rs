@@ -68,53 +68,18 @@ impl RuleEngine {
             }
         }
 
-        // Find the protection rule that matches this file
-        for protected_file in &self.config.protected_files {
-            let expanded_pattern = shellexpand::tilde(&protected_file.pattern);
-            if let Ok(pattern) = glob::Pattern::new(&expanded_pattern) {
-                if pattern.matches_path(file_path) {
-                    // First check new allow rules
-                    if !protected_file.allow_rules.is_empty() {
-                        for rule in &protected_file.allow_rules {
-                            if rule.matches_with_config(
-                                &context.path,
-                                context.ppid,
-                                context.team_id.as_deref(),
-                                context.app_id.as_deref(),
-                                context.args.as_deref(),
-                                context.uid,
-                                Some(&self.config),
-                            ) {
-                                log::debug!("Process allowed by allow rule");
-                                return Decision::Allow;
-                            }
-                        }
-                        // No rules matched
-                        return Decision::Deny;
-                    }
-
-                    // Fall back to legacy allowed_programs and allowed_signers
-                    return self.check_process_allowed(
-                        &context.path,
-                        &protected_file.allowed_programs,
-                        &protected_file.allowed_signers,
-                        &context.signing_info_display(),
-                    );
-                }
-            }
-        }
-
-        // If no pattern matched, allow by default
-        Decision::Allow
-    }
-
-    /// Check if a process is allowed to access a file (legacy API)
-    pub fn check_access(&self, process_path: &Path, file_path: &Path, signing_info: Option<&str>) -> Decision {
-        // First check runtime exceptions
-        let exception_key = (process_path.to_path_buf(), file_path.to_path_buf());
-        if let Some(expires_at) = self.runtime_exceptions.get(&exception_key) {
-            if expires_at.is_none_or(|exp| Instant::now() < exp) {
-                log::debug!("Access allowed by runtime exception");
+        // Check global exclusions (processes that can access any protected file)
+        for exclusion in &self.config.global_exclusions {
+            if exclusion.matches_with_config(
+                &context.path,
+                context.ppid,
+                context.team_id.as_deref(),
+                context.app_id.as_deref(),
+                context.args.as_deref(),
+                context.uid,
+                Some(&self.config),
+            ) {
+                log::info!("Access allowed by global exclusion: {}", context.path.display());
                 return Decision::Allow;
             }
         }
@@ -124,12 +89,24 @@ impl RuleEngine {
             let expanded_pattern = shellexpand::tilde(&protected_file.pattern);
             if let Ok(pattern) = glob::Pattern::new(&expanded_pattern) {
                 if pattern.matches_path(file_path) {
-                    return self.check_process_allowed(
-                        process_path,
-                        &protected_file.allowed_programs,
-                        &protected_file.allowed_signers,
-                        signing_info.unwrap_or(""),
-                    );
+                    // Check allow rules
+                    for rule in &protected_file.allow_rules {
+                        if rule.matches_with_config(
+                            &context.path,
+                            context.ppid,
+                            context.team_id.as_deref(),
+                            context.app_id.as_deref(),
+                            context.args.as_deref(),
+                            context.uid,
+                            Some(&self.config),
+                        ) {
+                            log::info!("Process allowed by allow rule");
+                            return Decision::Allow;
+                        }
+                    }
+                    // No rules matched - deny access
+                    log::warn!("No allow rules matched for {}", context.path.display());
+                    return Decision::Deny;
                 }
             }
         }
@@ -138,191 +115,7 @@ impl RuleEngine {
         Decision::Allow
     }
 
-    fn check_process_allowed(
-        &self,
-        process_path: &Path,
-        allowed_programs: &[String],
-        allowed_signers: &[String],
-        signing_info: &str,
-    ) -> Decision {
-        // Check if this is trusted by signing (macOS only)
-        if !signing_info.is_empty() {
-            // Check file-specific allowed signers
-            for allowed_signer in allowed_signers {
-                if signing_info.contains(allowed_signer) {
-                    log::debug!("Process allowed by signer: {}", allowed_signer);
-                    return Decision::Allow;
-                }
-            }
-        }
 
-        // Get the process name
-        let process_name = process_path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("");
-
-        // Check if the process name matches any allowed program
-        for allowed_program in allowed_programs {
-            if process_name.contains(allowed_program) {
-                // Additional verification based on platform
-                if self.verify_process_legitimacy(process_path, allowed_program) {
-                    log::debug!(
-                        "Process {} allowed for program {}",
-                        process_path.display(),
-                        allowed_program
-                    );
-                    return Decision::Allow;
-                }
-            }
-        }
-
-        log::debug!(
-            "Process {} not in allowed programs: {:?}",
-            process_path.display(),
-            allowed_programs
-        );
-        Decision::Deny
-    }
-
-    fn verify_process_legitimacy(&self, process_path: &Path, _program_name: &str) -> bool {
-        // Resolve symlinks to get the real path
-        let real_path = match process_path.canonicalize() {
-            Ok(p) => p,
-            Err(_) => {
-                // On Linux, /proc/PID/exe might point to deleted files
-                // In that case, use the original path
-                #[cfg(target_os = "linux")]
-                {
-                    if process_path.to_string_lossy().contains("(deleted)") {
-                        log::warn!(
-                            "Process executable has been deleted: {}",
-                            process_path.display()
-                        );
-                        return false;
-                    }
-                }
-                log::warn!("Cannot resolve path: {}", process_path.display());
-                return false;
-            }
-        };
-
-        // Check if the process is in a legitimate location
-        self.is_in_allowed_paths(&real_path)
-    }
-
-    fn is_in_allowed_paths(&self, process_path: &Path) -> bool {
-        // Check if the process is in configured allowed paths
-        if self.config.is_allowed_path(process_path) {
-            log::debug!(
-                "Process path {} is in allowed paths",
-                process_path.display()
-            );
-            return true;
-        }
-
-        // Additional verification for macOS code signatures
-        #[cfg(target_os = "macos")]
-        {
-            if self.verify_macos_signature(process_path) {
-                log::debug!(
-                    "Process {} verified by code signature",
-                    process_path.display()
-                );
-                return true;
-            }
-        }
-
-        // Additional verification for Linux - check if it's a system package
-        #[cfg(target_os = "linux")]
-        {
-            if self.verify_linux_package(process_path) {
-                log::debug!(
-                    "Process {} verified as system package",
-                    process_path.display()
-                );
-                return true;
-            }
-        }
-
-        log::debug!("Process path {} not in allowed paths", process_path.display());
-        false
-    }
-
-    #[cfg(target_os = "macos")]
-    fn verify_macos_signature(&self, process_path: &Path) -> bool {
-        use std::process::Command;
-
-        // Try to verify the code signature
-        match Command::new("codesign")
-            .args(["--verify", "--strict", process_path.to_str().unwrap_or("")])
-            .output()
-        {
-            Ok(output) => {
-                if output.status.success() {
-                    log::debug!("Code signature verified for {}", process_path.display());
-                    true
-                } else {
-                    log::debug!(
-                        "Code signature verification failed for {}",
-                        process_path.display()
-                    );
-                    false
-                }
-            }
-            Err(e) => {
-                log::debug!("Failed to run codesign: {}", e);
-                false
-            }
-        }
-    }
-
-    #[cfg(target_os = "linux")]
-    fn verify_linux_package(&self, process_path: &Path) -> bool {
-        use std::process::Command;
-
-        // Check if the binary belongs to a system package
-        // Try dpkg first (Debian/Ubuntu)
-        if let Ok(output) = Command::new("dpkg")
-            .args(&["-S", process_path.to_str().unwrap_or("")])
-            .output()
-        {
-            if output.status.success() {
-                log::debug!(
-                    "Process {} verified as dpkg package",
-                    process_path.display()
-                );
-                return true;
-            }
-        }
-
-        // Try rpm (Red Hat/Fedora)
-        if let Ok(output) = Command::new("rpm")
-            .args(&["-qf", process_path.to_str().unwrap_or("")])
-            .output()
-        {
-            if output.status.success() {
-                log::debug!("Process {} verified as rpm package", process_path.display());
-                return true;
-            }
-        }
-
-        // Check if it's in a system directory even if not in a package
-        let system_dirs = ["/usr/bin", "/bin", "/usr/sbin", "/sbin"];
-        let path_str = process_path.to_string_lossy();
-        for dir in &system_dirs {
-            if path_str.starts_with(dir) {
-                log::debug!(
-                    "Process {} in system directory {}",
-                    process_path.display(),
-                    dir
-                );
-                return true;
-            }
-        }
-
-        false
-    }
 
     /// Add a runtime exception (temporary allow)
     pub fn add_runtime_exception(&mut self, process_path: PathBuf, file_path: PathBuf) {
