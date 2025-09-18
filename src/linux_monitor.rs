@@ -349,6 +349,10 @@ impl LinuxMonitor {
 
     fn init_fanotify(&mut self) -> Result<()> {
         // Initialize fanotify with permission events
+        // Note: FAN_UNLIMITED_QUEUE and FAN_UNLIMITED_MARKS are not defined, using values
+        const FAN_UNLIMITED_QUEUE: u32 = 0x00000010;
+        const FAN_UNLIMITED_MARKS: u32 = 0x00000020;
+
         let flags = FAN_CLASS_PRE_CONTENT | FAN_CLOEXEC | FAN_UNLIMITED_QUEUE | FAN_UNLIMITED_MARKS;
         let event_f_flags = libc::O_RDONLY | libc::O_LARGEFILE;
 
@@ -592,16 +596,27 @@ impl LinuxMonitor {
                     break;
                 }
 
-                log::debug!("Event metadata: fd={}, pid={}, mask=0x{:x}, event_len={}",
-                    metadata.fd, metadata.pid, metadata.mask, metadata.event_len);
+                log::debug!("Event metadata: fd={}, pid={}, mask=0x{:x}, event_len={}, vers={}, metadata_len={}",
+                    metadata.fd, metadata.pid, metadata.mask, metadata.event_len,
+                    metadata.vers, metadata.metadata_len);
+
+                // Sanity checks
+                if metadata.event_len == 0 || metadata.event_len as usize > buffer.len() {
+                    log::error!("Invalid event_len: {}", metadata.event_len);
+                    break;
+                }
+
+                if metadata.fd < 0 {
+                    log::warn!("Invalid fd in event: {}", metadata.fd);
+                    offset += metadata.event_len as usize;
+                    continue;
+                }
 
                 // Handle the event - don't propagate errors, just log them
                 if let Err(e) = self.handle_event(metadata).await {
                     log::error!("Error handling event: {}", e);
-                    // Try to close the fd if we have one
-                    if metadata.fd >= 0 {
-                        unsafe { libc::close(metadata.fd) };
-                    }
+                    // DON'T close metadata.fd here - it might be our fanotify fd!
+                    // The handle_event function should handle closing it if needed
                 }
 
                 offset += metadata.event_len as usize;
