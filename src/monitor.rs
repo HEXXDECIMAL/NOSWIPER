@@ -2008,7 +2008,7 @@ impl Monitor {
 
         // Use the Linux-specific monitor implementation
         let mut linux_monitor =
-            LinuxMonitor::new(self.mode.clone(), self.verbose, self.stop_parent);
+            LinuxMonitor::new(self.mode.clone(), self.verbose, self.stop_parent)?;
         linux_monitor.start().await
     }
 
