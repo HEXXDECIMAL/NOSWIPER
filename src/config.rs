@@ -68,7 +68,9 @@ pub struct MonitoringConfig {
 impl Config {
     /// Load the default embedded configuration
     pub fn default() -> Result<Self, serde_yaml::Error> {
-        serde_yaml::from_str(DEFAULT_CONFIG_YAML)
+        let config: Config = serde_yaml::from_str(DEFAULT_CONFIG_YAML)?;
+        config.validate_global_exclusions()?;
+        Ok(config)
     }
 
     /// Load configuration from a file, merging with defaults
@@ -76,10 +78,27 @@ impl Config {
     pub fn from_file(path: &std::path::Path) -> Result<Self, Box<dyn std::error::Error>> {
         let contents = std::fs::read_to_string(path)?;
         let user_config: Config = serde_yaml::from_str(&contents)?;
+        user_config.validate_global_exclusions()
+            .map_err(|e| format!("Configuration validation failed: {}", e))?;
 
         // For now, just return the user config
         // TODO: Implement proper merging with defaults
         Ok(user_config)
+    }
+
+    /// Validate that all global exclusions have either path_pattern or team_id
+    fn validate_global_exclusions(&self) -> Result<(), serde_yaml::Error> {
+        for (i, rule) in self.global_exclusions.iter().enumerate() {
+            if rule.path_pattern.is_none() && rule.team_id.is_none() {
+                let msg = format!(
+                    "Global exclusion rule {} is missing both path_pattern and team_id. \
+                     Every global exclusion must have at least one of these for security.",
+                    i + 1
+                );
+                return Err(serde::de::Error::custom(msg));
+            }
+        }
+        Ok(())
     }
 
 

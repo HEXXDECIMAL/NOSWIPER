@@ -3,6 +3,10 @@
 # Users can override these with ~/.config/noswiper/config.yaml
 
 # Global exclusions - processes that can access ANY protected file
+# IMPORTANT: Every global exclusion MUST have either:
+#   - A hardcoded path_pattern OR team_id (for security validation)
+#   - Additional restrictions like base and ppid are recommended
+# Without path_pattern or team_id, a rule could match any process!
 global_exclusions:
   # Apple system processes from /System/* (like mdworker_shared, Safari services, etc.)
   - app_id: "com.apple.*"
@@ -11,14 +15,19 @@ global_exclusions:
 
   # Popular backup programs (GUI apps must have ppid=1)
   - base: "syncthing"
+    path_pattern: "/usr/local/bin/syncthing"  # Usually installed here
     ppid: 1
   - base: "rsyncd"  # System daemon, no ppid restriction
+    path_pattern: "/usr/*bin/rsyncd"
   - base: "rsync"   # Command-line tool, no ppid restriction
+    path_pattern: "/usr/*bin/rsync"
   - base: "Time Machine"
     app_id: "com.apple.*"
+    path_pattern: "/System/*"  # Apple system app
     ppid: 1
   - base: "backupd"
     app_id: "com.apple.*"
+    path_pattern: "/System/*"  # Apple system daemon
     ppid: 1
 
   # Popular cloud sync services
@@ -286,8 +295,8 @@ protected_files:
       - "~/.config/google-chrome-unstable/*/Web Data"
       - "~/.config/google-chrome-unstable/*/History"
     allow:
-      # Google Chrome (all variants)
-      - team_id: "EQHXZ8M8AV"  # Google
+      # Google Chrome (all variants have same team ID)
+      - team_id: "EQHXZ8M8AV"  # Google (includes Chrome, Beta, Canary, and all helpers)
       # Linux variants
       - base: "google-chrome"
       - base: "google-chrome-stable"
@@ -993,6 +1002,9 @@ default_base_paths:
     - /opt/homebrew/sbin
     - /opt/homebrew/Cellar/*/bin
     - /opt/homebrew/Cellar/*/sbin
+    - /nix/store/*/bin  # Nix packages
+    - /run/current-system/sw/bin  # NixOS system packages
+    - ~/.nix-profile/bin  # User nix packages
     - /Applications/*/Contents/MacOS
     - /Applications/*/*/Contents/MacOS
     - ~/Applications/*/Contents/MacOS
@@ -1010,6 +1022,9 @@ default_base_paths:
     - /snap/bin
     - /var/lib/flatpak/exports/bin
     - ~/.local/bin
+    - /nix/store/*/bin  # Nix packages
+    - /run/current-system/sw/bin  # NixOS system packages
+    - ~/.nix-profile/bin  # User nix packages
 
   freebsd:
     - /usr/bin
