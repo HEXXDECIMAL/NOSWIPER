@@ -1,6 +1,6 @@
-use serde::{Deserialize, Deserializer, Serialize};
-use std::path::Path;
 use crate::config::Config;
+use crate::process_context::ProcessContext;
+use serde::{Deserialize, Deserializer, Serialize};
 
 /// A single allow rule with AND logic between conditions
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -40,60 +40,51 @@ pub struct AllowRule {
 
 impl AllowRule {
     /// Check if this rule matches the given process context
-    #[allow(dead_code)]  // Will be used when monitor is updated
-    pub fn matches(
-        &self,
-        process_path: &Path,
-        ppid: Option<u32>,
-        team_id: Option<&str>,
-        app_id: Option<&str>,
-        args: Option<&[String]>,
-        uid: Option<u32>,
-        euid: Option<u32>,
-    ) -> bool {
-        self.matches_with_config(process_path, ppid, team_id, app_id, args, uid, euid, None)
+    #[allow(dead_code)] // Will be used when monitor is updated
+    #[allow(clippy::too_many_arguments)] // TODO: Refactor to use ProcessContext fully
+    pub fn matches(&self, context: &ProcessContext) -> bool {
+        self.matches_with_config(context, None)
     }
 
     /// Check if this rule matches the given process context, with config for default paths
-    #[allow(dead_code)]  // Will be used when monitor is updated
-    pub fn matches_with_config(
-        &self,
-        process_path: &Path,
-        ppid: Option<u32>,
-        team_id: Option<&str>,
-        app_id: Option<&str>,
-        args: Option<&[String]>,
-        uid: Option<u32>,
-        euid: Option<u32>,
-        config: Option<&Config>,
-    ) -> bool {
+    #[allow(dead_code)] // Will be used when monitor is updated
+    pub fn matches_with_config(&self, context: &ProcessContext, config: Option<&Config>) -> bool {
         // All specified conditions must match (AND logic)
 
         // Check basename (supports wildcards)
         if let Some(ref expected_basename) = self.base {
-            let actual_basename = process_path
+            let actual_basename = context
+                .path
                 .file_name()
                 .and_then(|n| n.to_str())
                 .unwrap_or("");
 
             if !matches_pattern(expected_basename, actual_basename) {
-                log::debug!("Rule failed: basename pattern '{}' doesn't match '{}'", expected_basename, actual_basename);
+                log::debug!(
+                    "Rule failed: basename pattern '{}' doesn't match '{}'",
+                    expected_basename,
+                    actual_basename
+                );
                 return false;
             }
         }
 
         // Check path pattern
         if let Some(ref pattern) = self.path_pattern {
-            let path_str = process_path.to_string_lossy();
+            let path_str = context.path.to_string_lossy();
             if !matches_pattern(pattern, &path_str) {
-                log::debug!("Rule failed: path pattern '{}' doesn't match '{}'", pattern, path_str);
+                log::debug!(
+                    "Rule failed: path pattern '{}' doesn't match '{}'",
+                    pattern,
+                    path_str
+                );
                 return false;
             }
         } else if self.base.is_some() && self.path_pattern.is_none() {
             // If base is specified but no path_pattern, check against default paths
             if let Some(cfg) = config {
-                if !cfg.is_allowed_path(process_path) {
-                    log::debug!("Rule failed: basename specified but process path '{}' not in default base paths", process_path.display());
+                if !cfg.is_allowed_path(&context.path) {
+                    log::debug!("Rule failed: basename specified but process path '{}' not in default base paths", context.path.display());
                     return false;
                 }
             }
@@ -101,23 +92,34 @@ impl AllowRule {
 
         // Check ppid
         if let Some(expected_ppid) = self.ppid {
-            if ppid != Some(expected_ppid) {
-                log::debug!("Rule failed: ppid mismatch. Expected {}, got {:?}", expected_ppid, ppid);
+            if context.ppid != Some(expected_ppid) {
+                log::debug!(
+                    "Rule failed: ppid mismatch. Expected {}, got {:?}",
+                    expected_ppid,
+                    context.ppid
+                );
                 return false;
             }
         }
 
         // Check team_id (secure)
         if let Some(ref expected_team_id) = self.team_id {
-            match team_id {
+            match &context.team_id {
                 Some(actual_team_id) => {
                     if !matches_pattern(expected_team_id, actual_team_id) {
-                        log::debug!("Rule failed: team_id pattern '{}' doesn't match '{}'", expected_team_id, actual_team_id);
+                        log::debug!(
+                            "Rule failed: team_id pattern '{}' doesn't match '{}'",
+                            expected_team_id,
+                            actual_team_id
+                        );
                         return false;
                     }
                 }
                 None => {
-                    log::debug!("Rule failed: expected team_id '{}' but none provided", expected_team_id);
+                    log::debug!(
+                        "Rule failed: expected team_id '{}' but none provided",
+                        expected_team_id
+                    );
                     return false;
                 }
             }
@@ -125,15 +127,22 @@ impl AllowRule {
 
         // Check app_id (less secure, can be spoofed)
         if let Some(ref expected_app_id) = self.app_id {
-            match app_id {
+            match &context.app_id {
                 Some(actual_app_id) => {
                     if !matches_pattern(expected_app_id, actual_app_id) {
-                        log::debug!("Rule failed: app_id pattern '{}' doesn't match '{}'", expected_app_id, actual_app_id);
+                        log::debug!(
+                            "Rule failed: app_id pattern '{}' doesn't match '{}'",
+                            expected_app_id,
+                            actual_app_id
+                        );
                         return false;
                     }
                 }
                 None => {
-                    log::debug!("Rule failed: expected app_id '{}' but none provided", expected_app_id);
+                    log::debug!(
+                        "Rule failed: expected app_id '{}' but none provided",
+                        expected_app_id
+                    );
                     return false;
                 }
             }
@@ -141,16 +150,23 @@ impl AllowRule {
 
         // Check args pattern
         if let Some(ref pattern) = self.args_pattern {
-            match args {
+            match &context.args {
                 Some(actual_args) => {
                     let args_str = actual_args.join(" ");
                     if !matches_pattern(pattern, &args_str) {
-                        log::debug!("Rule failed: args pattern '{}' doesn't match '{}'", pattern, args_str);
+                        log::debug!(
+                            "Rule failed: args pattern '{}' doesn't match '{}'",
+                            pattern,
+                            args_str
+                        );
                         return false;
                     }
                 }
                 None => {
-                    log::debug!("Rule failed: expected args pattern '{}' but no args provided", pattern);
+                    log::debug!(
+                        "Rule failed: expected args pattern '{}' but no args provided",
+                        pattern
+                    );
                     return false;
                 }
             }
@@ -158,23 +174,36 @@ impl AllowRule {
 
         // Check uid
         if let Some(expected_uid) = self.uid {
-            if uid != Some(expected_uid) {
-                log::debug!("Rule failed: uid mismatch. Expected {}, got {:?}", expected_uid, uid);
+            if context.uid != Some(expected_uid) {
+                log::debug!(
+                    "Rule failed: uid mismatch. Expected {}, got {:?}",
+                    expected_uid,
+                    context.uid
+                );
                 return false;
             }
         }
 
         // Check euid (handles both single values and ranges)
         if let Some((min_euid, max_euid)) = self.euid {
-            match euid {
+            match context.euid {
                 Some(actual_euid) => {
                     if actual_euid < min_euid || actual_euid > max_euid {
-                        log::debug!("Rule failed: euid {} not in range {}-{}", actual_euid, min_euid, max_euid);
+                        log::debug!(
+                            "Rule failed: euid {} not in range {}-{}",
+                            actual_euid,
+                            min_euid,
+                            max_euid
+                        );
                         return false;
                     }
                 }
                 None => {
-                    log::debug!("Rule failed: expected euid in range {}-{} but none provided", min_euid, max_euid);
+                    log::debug!(
+                        "Rule failed: expected euid in range {}-{} but none provided",
+                        min_euid,
+                        max_euid
+                    );
                     return false;
                 }
             }
@@ -186,7 +215,7 @@ impl AllowRule {
 }
 
 /// Simple glob-like pattern matching
-#[allow(dead_code)]  // Will be used when monitor is updated
+#[allow(dead_code)] // Will be used when monitor is updated
 fn matches_pattern(pattern: &str, text: &str) -> bool {
     // Handle wildcards
     if pattern.contains('*') {
@@ -282,10 +311,12 @@ where
 
             if let Some(dash_pos) = value.find('-') {
                 // Parse range like "501-599"
-                let start = value[..dash_pos].trim().parse::<u32>()
-                    .map_err(|_| E::custom(format!("Invalid start of range: {}", &value[..dash_pos])))?;
-                let end = value[dash_pos + 1..].trim().parse::<u32>()
-                    .map_err(|_| E::custom(format!("Invalid end of range: {}", &value[dash_pos + 1..])))?;
+                let start = value[..dash_pos].trim().parse::<u32>().map_err(|_| {
+                    E::custom(format!("Invalid start of range: {}", &value[..dash_pos]))
+                })?;
+                let end = value[dash_pos + 1..].trim().parse::<u32>().map_err(|_| {
+                    E::custom(format!("Invalid end of range: {}", &value[dash_pos + 1..]))
+                })?;
 
                 if start > end {
                     return Err(E::custom(format!("Invalid range: {} > {}", start, end)));
@@ -294,7 +325,9 @@ where
                 Ok(Some((start, end)))
             } else {
                 // Single value
-                let val = value.trim().parse::<u32>()
+                let val = value
+                    .trim()
+                    .parse::<u32>()
                     .map_err(|_| E::custom(format!("Invalid EUID value: {}", value)))?;
                 Ok(Some((val, val)))
             }
@@ -307,20 +340,29 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
 
     #[test]
     fn test_pattern_matching() {
         assert!(matches_pattern("*.app", "Firefox.app"));
-        assert!(matches_pattern("/Applications/*/*.app/Contents/MacOS/*",
-                               "/Applications/Firefox.app/Contents/MacOS/firefox"));
+        assert!(matches_pattern(
+            "/Applications/*/*.app/Contents/MacOS/*",
+            "/Applications/Firefox.app/Contents/MacOS/firefox"
+        ));
         assert!(matches_pattern("com.apple.*", "com.apple.security"));
         assert!(!matches_pattern("com.apple.*", "com.google.chrome"));
         assert!(matches_pattern("firefox", "firefox"));
         assert!(!matches_pattern("firefox", "chrome"));
 
         // Test basename wildcards
-        assert!(matches_pattern("docker-credential-*", "docker-credential-desktop"));
-        assert!(matches_pattern("docker-credential-*", "docker-credential-pass"));
+        assert!(matches_pattern(
+            "docker-credential-*",
+            "docker-credential-desktop"
+        ));
+        assert!(matches_pattern(
+            "docker-credential-*",
+            "docker-credential-pass"
+        ));
         assert!(!matches_pattern("docker-credential-*", "docker-compose"));
         assert!(matches_pattern("pinentry*", "pinentry"));
         assert!(matches_pattern("pinentry*", "pinentry-gtk-2"));
@@ -339,24 +381,19 @@ mod tests {
             app_id: None,
             args_pattern: None,
             uid: None,
+            euid: None,
         };
 
-        assert!(rule.matches(
-            Path::new("/Applications/Firefox.app/Contents/MacOS/firefox"),
-            Some(1),
-            None,
-            None,
-            None,
-            None
-        ));
+        let context1 = ProcessContext::new(
+            Path::new("/Applications/Firefox.app/Contents/MacOS/firefox").to_path_buf(),
+        )
+        .with_ppid(1);
+        assert!(rule.matches(&context1));
 
-        assert!(!rule.matches(
-            Path::new("/Applications/Firefox.app/Contents/MacOS/firefox"),
-            Some(2), // Wrong ppid
-            None,
-            None,
-            None,
-            None
-        ));
+        let context2 = ProcessContext::new(
+            Path::new("/Applications/Firefox.app/Contents/MacOS/firefox").to_path_buf(),
+        )
+        .with_ppid(2); // Wrong ppid
+        assert!(!rule.matches(&context2));
     }
 }

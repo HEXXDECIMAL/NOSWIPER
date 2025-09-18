@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 /// Context information about a process
 #[derive(Debug, Clone)]
-#[allow(dead_code)]  // Will be used when monitor is updated
+#[allow(dead_code)] // Will be used when monitor is updated
 pub struct ProcessContext {
     /// Full path to the process executable
     pub path: PathBuf,
@@ -46,43 +46,50 @@ impl ProcessContext {
     }
 
     /// Set PID
-    #[allow(dead_code)] pub fn with_pid(mut self, pid: u32) -> Self {
+    #[allow(dead_code)]
+    pub fn with_pid(mut self, pid: u32) -> Self {
         self.pid = Some(pid);
         self
     }
 
     /// Set PPID
-    #[allow(dead_code)] pub fn with_ppid(mut self, ppid: u32) -> Self {
+    #[allow(dead_code)]
+    pub fn with_ppid(mut self, ppid: u32) -> Self {
         self.ppid = Some(ppid);
         self
     }
 
     /// Set team ID
-    #[allow(dead_code)] pub fn with_team_id(mut self, team_id: impl Into<String>) -> Self {
+    #[allow(dead_code)]
+    pub fn with_team_id(mut self, team_id: impl Into<String>) -> Self {
         self.team_id = Some(team_id.into());
         self
     }
 
     /// Set app ID
-    #[allow(dead_code)] pub fn with_app_id(mut self, app_id: impl Into<String>) -> Self {
+    #[allow(dead_code)]
+    pub fn with_app_id(mut self, app_id: impl Into<String>) -> Self {
         self.app_id = Some(app_id.into());
         self
     }
 
     /// Set args
-    #[allow(dead_code)] pub fn with_args(mut self, args: Vec<String>) -> Self {
+    #[allow(dead_code)]
+    pub fn with_args(mut self, args: Vec<String>) -> Self {
         self.args = Some(args);
         self
     }
 
     /// Set UID
-    #[allow(dead_code)] pub fn with_uid(mut self, uid: u32) -> Self {
+    #[allow(dead_code)]
+    pub fn with_uid(mut self, uid: u32) -> Self {
         self.uid = Some(uid);
         self
     }
 
     /// Set EUID
-    #[allow(dead_code)] pub fn with_euid(mut self, euid: u32) -> Self {
+    #[allow(dead_code)]
+    pub fn with_euid(mut self, euid: u32) -> Self {
         self.euid = Some(euid);
         self
     }

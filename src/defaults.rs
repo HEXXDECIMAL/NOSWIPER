@@ -145,19 +145,19 @@ pub const DEFAULT_PROTECTED: &[(&str, &[&str])] = &[
             "Keychain Access",
             "SecurityAgent",
             "codesign",
-            "accountsd",      // Apple account management
-            "sharingd",       // Apple sharing services
-            "cloudd",         // iCloud services
-            "Safari",         // Safari browser
-            "Google Chrome",  // Google Chrome browser
-            "Google Drive",   // Google Drive sync
-            "Dropbox",        // Dropbox sync
-            "1Password",      // Password managers
+            "accountsd",     // Apple account management
+            "sharingd",      // Apple sharing services
+            "cloudd",        // iCloud services
+            "Safari",        // Safari browser
+            "Google Chrome", // Google Chrome browser
+            "Google Drive",  // Google Drive sync
+            "Dropbox",       // Dropbox sync
+            "1Password",     // Password managers
             "Bitwarden",
             "LastPass",
             "Dashlane",
-            "securityd",      // macOS security daemon
-            "trustd",         // Certificate trust daemon
+            "securityd", // macOS security daemon
+            "trustd",    // Certificate trust daemon
         ],
     ),
     (
@@ -167,19 +167,19 @@ pub const DEFAULT_PROTECTED: &[(&str, &[&str])] = &[
             "Keychain Access",
             "SecurityAgent",
             "codesign",
-            "accountsd",      // Apple account management
-            "sharingd",       // Apple sharing services
-            "cloudd",         // iCloud services
-            "Safari",         // Safari browser
-            "Google Chrome",  // Google Chrome browser
-            "Google Drive",   // Google Drive sync
-            "Dropbox",        // Dropbox sync
-            "1Password",      // Password managers
+            "accountsd",     // Apple account management
+            "sharingd",      // Apple sharing services
+            "cloudd",        // iCloud services
+            "Safari",        // Safari browser
+            "Google Chrome", // Google Chrome browser
+            "Google Drive",  // Google Drive sync
+            "Dropbox",       // Dropbox sync
+            "1Password",     // Password managers
             "Bitwarden",
             "LastPass",
             "Dashlane",
-            "securityd",      // macOS security daemon
-            "trustd",         // Certificate trust daemon
+            "securityd", // macOS security daemon
+            "trustd",    // Certificate trust daemon
         ],
     ),
     (
@@ -245,7 +245,7 @@ pub const MACOS_COMMON_PATHS: &[&str] = &[
 ];
 
 /// Common paths for legitimate programs on Linux
-#[allow(dead_code)]  // Will be removed after full migration
+#[allow(dead_code)] // Will be removed after full migration
 pub const LINUX_COMMON_PATHS: &[&str] = &[
     // System binaries
     "/usr/bin/*",

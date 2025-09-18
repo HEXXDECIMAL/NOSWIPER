@@ -9,30 +9,20 @@ use std::io;
 use std::mem;
 use std::path::{Path, PathBuf};
 
-// Fanotify constants not in nix crate
+// Fanotify constants not in nix crate - only keep the ones we actually use
 const FAN_OPEN_PERM: u64 = 0x00010000;
-const FAN_ACCESS_PERM: u64 = 0x00020000;
-const FAN_OPEN_EXEC_PERM: u64 = 0x00040000;
 
-const FAN_EVENT_ON_CHILD: u64 = 0x08000000;
 const FAN_UNLIMITED_QUEUE: u32 = 0x00000010;
 const FAN_UNLIMITED_MARKS: u32 = 0x00000020;
-const FAN_ENABLE_AUDIT: u32 = 0x00000040;
 
 const FAN_MARK_ADD: u32 = 0x00000001;
-const FAN_MARK_MOUNT: u32 = 0x00000010;
-const FAN_MARK_FILESYSTEM: u32 = 0x00000100;
 
 const FAN_ALLOW: u32 = 0x01;
 const FAN_DENY: u32 = 0x02;
-const FAN_AUDIT: u32 = 0x10;
 
-const FAN_CLASS_NOTIF: u32 = 0x00000000;
-const FAN_CLASS_CONTENT: u32 = 0x00000004;
 const FAN_CLASS_PRE_CONTENT: u32 = 0x00000008;
 
 const FAN_CLOEXEC: u32 = 0x00000001;
-const FAN_NONBLOCK: u32 = 0x00000002;
 
 // Fanotify event metadata structure
 #[repr(C)]
@@ -58,7 +48,9 @@ pub struct FanotifyResponse {
 pub struct LinuxMonitor {
     rule_engine: RuleEngine,
     mode: Mode,
+    #[allow(dead_code)] // Will be used for verbose logging
     verbose: bool,
+    #[allow(dead_code)] // Will be used for parent process stopping
     stop_parent: bool,
     fanotify_fd: Option<i32>,
     watched_paths: Vec<PathBuf>,
@@ -213,7 +205,12 @@ impl LinuxMonitor {
             let flags = FAN_MARK_ADD;
             let dirfd = libc::AT_FDCWD;
 
-            let path_cstr = std::ffi::CString::new(path.to_str().unwrap())?;
+            let path_str = path.to_str().ok_or_else(|| {
+                anyhow::anyhow!("Path contains invalid UTF-8: {}", path.display())
+            })?;
+            let path_cstr = std::ffi::CString::new(path_str).map_err(|e| {
+                anyhow::anyhow!("Path contains null bytes: {} ({})", path.display(), e)
+            })?;
 
             let ret = unsafe { libc::fanotify_mark(fd, flags, mask, dirfd, path_cstr.as_ptr()) };
 
@@ -320,7 +317,7 @@ impl LinuxMonitor {
         let context = ProcessContext {
             path: process_path.clone(),
             pid: Some(metadata.pid as u32),
-            ppid: None, // TODO: Get parent PID on Linux
+            ppid: None,    // TODO: Get parent PID on Linux
             team_id: None, // Not available on Linux
             app_id: None,  // Not available on Linux
             args: None,    // TODO: Get command-line args on Linux
@@ -329,7 +326,9 @@ impl LinuxMonitor {
         };
 
         // Check if access is allowed using new context-aware method
-        let decision = self.rule_engine.check_access_with_context(&context, &file_path);
+        let decision = self
+            .rule_engine
+            .check_access_with_context(&context, &file_path);
 
         match decision {
             Decision::Allow => {

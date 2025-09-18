@@ -1,4 +1,9 @@
-#[cfg(any(target_os = "freebsd", target_os = "netbsd", target_os = "illumos", target_os = "solaris"))]
+#[cfg(any(
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "illumos",
+    target_os = "solaris"
+))]
 use crate::cli::Mode;
 use crate::config::Config;
 use crate::rules::{Decision, RuleEngine};
@@ -39,7 +44,12 @@ impl Platform {
         #[cfg(target_os = "solaris")]
         return Platform::Solaris;
 
-        #[cfg(not(any(target_os = "freebsd", target_os = "netbsd", target_os = "illumos", target_os = "solaris")))]
+        #[cfg(not(any(
+            target_os = "freebsd",
+            target_os = "netbsd",
+            target_os = "illumos",
+            target_os = "solaris"
+        )))]
         Platform::FreeBSD // Default fallback
     }
 
@@ -98,8 +108,9 @@ proc:::exec-success
                     .and_then(|output| {
                         if output.status.success() {
                             let stdout = String::from_utf8_lossy(&output.stdout);
-                            stdout.lines()
-                                .nth(1)  // Skip header
+                            stdout
+                                .lines()
+                                .nth(1) // Skip header
                                 .and_then(|line| {
                                     let parts: Vec<&str> = line.split_whitespace().collect();
                                     parts.get(2).map(|path| PathBuf::from(path))
@@ -131,9 +142,7 @@ proc:::exec-success
                             .and_then(|output| {
                                 if output.status.success() {
                                     let stdout = String::from_utf8_lossy(&output.stdout);
-                                    stdout.lines()
-                                        .next()
-                                        .map(|line| PathBuf::from(line.trim()))
+                                    stdout.lines().next().map(|line| PathBuf::from(line.trim()))
                                 } else {
                                     None
                                 }
@@ -174,14 +183,16 @@ impl DTraceMonitor {
 
         // Start DTrace with our script
         let mut child = tokio::process::Command::new("dtrace")
-            .arg("-q")  // Quiet mode
+            .arg("-q") // Quiet mode
             .arg("-n")
             .arg(&self.dtrace_script)
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .spawn()?;
 
-        let stdout = child.stdout.take()
+        let stdout = child
+            .stdout
+            .take()
             .ok_or_else(|| anyhow::anyhow!("Failed to capture dtrace stdout"))?;
 
         let mut reader = BufReader::new(stdout);
@@ -218,25 +229,22 @@ impl DTraceMonitor {
     }
 
     async fn handle_open_event(&mut self, json: &serde_json::Value) -> Result<()> {
-        let pid = json.get("pid")
-            .and_then(|p| p.as_u64())
-            .map(|p| p as u32);
+        let pid = json.get("pid").and_then(|p| p.as_u64()).map(|p| p as u32);
 
-        let ppid = json.get("ppid")
-            .and_then(|p| p.as_u64())
-            .map(|p| p as u32);
+        let ppid = json.get("ppid").and_then(|p| p.as_u64()).map(|p| p as u32);
 
-        let process_name = json.get("execname")
+        let process_name = json
+            .get("execname")
             .and_then(|e| e.as_str())
             .unwrap_or("unknown");
 
-        let file_path = json.get("file")
-            .and_then(|f| f.as_str())
-            .unwrap_or("");
+        let file_path = json.get("file").and_then(|f| f.as_str()).unwrap_or("");
 
         // Get full process path
         let process_path = if let Some(pid) = pid {
-            self.platform.get_process_path(pid).unwrap_or_else(|| PathBuf::from(process_name))
+            self.platform
+                .get_process_path(pid)
+                .unwrap_or_else(|| PathBuf::from(process_name))
         } else {
             PathBuf::from(process_name)
         };
@@ -258,7 +266,9 @@ impl DTraceMonitor {
         }
 
         // Check if access is allowed
-        let decision = self.rule_engine.check_access(&process_path, &file_path_buf, None);
+        let decision = self
+            .rule_engine
+            .check_access(&process_path, &file_path_buf, None);
 
         match decision {
             Decision::Allow => {
@@ -307,7 +317,11 @@ impl DTraceMonitor {
                                     pid,
                                     ppid.map_or(String::from("?"), |p| p.to_string()),
                                     file_path,
-                                    if parent_stopped { format!(" + parent[{}]", ppid.unwrap()) } else { String::new() }
+                                    if parent_stopped {
+                                        format!(" + parent[{}]", ppid.unwrap())
+                                    } else {
+                                        String::new()
+                                    }
                                 );
                             } else {
                                 log::error!(
@@ -332,9 +346,7 @@ impl DTraceMonitor {
     }
 
     async fn handle_exec_event(&mut self, json: &serde_json::Value) -> Result<()> {
-        let args = json.get("args")
-            .and_then(|a| a.as_str())
-            .unwrap_or("");
+        let args = json.get("args").and_then(|a| a.as_str()).unwrap_or("");
 
         // Check if args contain protected paths
         let args_vec: Vec<String> = args.split_whitespace().map(String::from).collect();
@@ -344,15 +356,12 @@ impl DTraceMonitor {
             let path = PathBuf::from(&expanded);
 
             if self.rule_engine.is_protected_file(&path) {
-                let pid = json.get("pid")
-                    .and_then(|p| p.as_u64())
-                    .map(|p| p as u32);
+                let pid = json.get("pid").and_then(|p| p.as_u64()).map(|p| p as u32);
 
-                let ppid = json.get("ppid")
-                    .and_then(|p| p.as_u64())
-                    .map(|p| p as u32);
+                let ppid = json.get("ppid").and_then(|p| p.as_u64()).map(|p| p as u32);
 
-                let process_name = json.get("execname")
+                let process_name = json
+                    .get("execname")
                     .and_then(|e| e.as_str())
                     .unwrap_or("unknown");
 

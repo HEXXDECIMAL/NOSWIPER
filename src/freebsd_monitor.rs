@@ -60,14 +60,16 @@ proc:::exec-success
 
         // Start DTrace with our script
         let mut child = tokio::process::Command::new("dtrace")
-            .arg("-q")  // Quiet mode
+            .arg("-q") // Quiet mode
             .arg("-n")
             .arg(&self.dtrace_script)
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .spawn()?;
 
-        let stdout = child.stdout.take()
+        let stdout = child
+            .stdout
+            .take()
             .ok_or_else(|| anyhow::anyhow!("Failed to capture dtrace stdout"))?;
 
         let mut reader = BufReader::new(stdout);
@@ -104,25 +106,21 @@ proc:::exec-success
     }
 
     async fn handle_open_event(&mut self, json: &serde_json::Value) -> Result<()> {
-        let pid = json.get("pid")
-            .and_then(|p| p.as_u64())
-            .map(|p| p as u32);
+        let pid = json.get("pid").and_then(|p| p.as_u64()).map(|p| p as u32);
 
-        let ppid = json.get("ppid")
-            .and_then(|p| p.as_u64())
-            .map(|p| p as u32);
+        let ppid = json.get("ppid").and_then(|p| p.as_u64()).map(|p| p as u32);
 
-        let process_name = json.get("execname")
+        let process_name = json
+            .get("execname")
             .and_then(|e| e.as_str())
             .unwrap_or("unknown");
 
-        let file_path = json.get("file")
-            .and_then(|f| f.as_str())
-            .unwrap_or("");
+        let file_path = json.get("file").and_then(|f| f.as_str()).unwrap_or("");
 
         // Get full process path from procfs
         let process_path = if let Some(pid) = pid {
-            self.get_process_path(pid).unwrap_or_else(|| PathBuf::from(process_name))
+            self.get_process_path(pid)
+                .unwrap_or_else(|| PathBuf::from(process_name))
         } else {
             PathBuf::from(process_name)
         };
@@ -144,7 +142,9 @@ proc:::exec-success
         }
 
         // Check if access is allowed
-        let decision = self.rule_engine.check_access(&process_path, &file_path_buf, None);
+        let decision = self
+            .rule_engine
+            .check_access(&process_path, &file_path_buf, None);
 
         match decision {
             Decision::Allow => {
@@ -193,7 +193,11 @@ proc:::exec-success
                                     pid,
                                     ppid.map_or(String::from("?"), |p| p.to_string()),
                                     file_path,
-                                    if parent_stopped { format!(" + parent[{}]", ppid.unwrap()) } else { String::new() }
+                                    if parent_stopped {
+                                        format!(" + parent[{}]", ppid.unwrap())
+                                    } else {
+                                        String::new()
+                                    }
                                 );
                             } else {
                                 log::error!(
@@ -218,9 +222,7 @@ proc:::exec-success
     }
 
     async fn handle_exec_event(&mut self, json: &serde_json::Value) -> Result<()> {
-        let args = json.get("args")
-            .and_then(|a| a.as_str())
-            .unwrap_or("");
+        let args = json.get("args").and_then(|a| a.as_str()).unwrap_or("");
 
         // Check if args contain protected paths
         let args_vec: Vec<String> = args.split_whitespace().map(String::from).collect();
@@ -230,15 +232,12 @@ proc:::exec-success
             let path = PathBuf::from(&expanded);
 
             if self.rule_engine.is_protected_file(&path) {
-                let pid = json.get("pid")
-                    .and_then(|p| p.as_u64())
-                    .map(|p| p as u32);
+                let pid = json.get("pid").and_then(|p| p.as_u64()).map(|p| p as u32);
 
-                let ppid = json.get("ppid")
-                    .and_then(|p| p.as_u64())
-                    .map(|p| p as u32);
+                let ppid = json.get("ppid").and_then(|p| p.as_u64()).map(|p| p as u32);
 
-                let process_name = json.get("execname")
+                let process_name = json
+                    .get("execname")
                     .and_then(|e| e.as_str())
                     .unwrap_or("unknown");
 
@@ -280,8 +279,9 @@ proc:::exec-success
                 if output.status.success() {
                     let stdout = String::from_utf8_lossy(&output.stdout);
                     // Parse procstat output to get binary path
-                    stdout.lines()
-                        .nth(1)  // Skip header
+                    stdout
+                        .lines()
+                        .nth(1) // Skip header
                         .and_then(|line| {
                             let parts: Vec<&str> = line.split_whitespace().collect();
                             parts.get(2).map(|path| PathBuf::from(path))

@@ -1,18 +1,48 @@
 use crate::cli::{Mechanism, Mode};
 use crate::config::Config;
-use crate::rules::{Decision, RuleEngine};
+#[cfg(target_os = "macos")]
+use crate::rules::Decision;
+use crate::rules::RuleEngine;
 use anyhow::Result;
 #[cfg(target_os = "macos")]
 use serde::Deserialize;
+#[cfg(target_os = "macos")]
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(target_os = "macos")]
+use std::path::PathBuf;
+#[cfg(target_os = "macos")]
 use std::process::Command;
+#[cfg(target_os = "macos")]
 use std::time::{Duration, Instant};
 #[cfg(target_os = "macos")]
 use tokio::io::{AsyncBufReadExt, BufReader};
 
 #[cfg(target_os = "macos")]
 use tokio::process::Command as TokioCommand;
+
+// Type aliases to reduce complexity
+#[cfg(target_os = "macos")]
+#[allow(dead_code)] // Will be used to simplify function signatures
+type OpenEventResult = Option<(
+    PathBuf,
+    PathBuf,
+    Option<u32>,
+    Option<u32>,
+    Option<u32>,
+    Option<String>,
+)>;
+
+#[cfg(target_os = "macos")]
+#[allow(dead_code)] // Will be used to simplify function signatures
+type ExecEventResult = Option<(
+    PathBuf,
+    Vec<String>,
+    Option<u32>,
+    Option<u32>,
+    Option<u32>,
+    Option<String>,
+)>;
 
 #[cfg(target_os = "linux")]
 use crate::linux_monitor::LinuxMonitor;
@@ -144,12 +174,16 @@ impl Monitor {
 
         // Start eslogger process
         let mut child = TokioCommand::new("eslogger")
-            .args(&eslogger_args)
+            .args(eslogger_args)
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .spawn()
             .map_err(|e| {
-                anyhow::anyhow!("Failed to spawn eslogger process: {}. Command was: {}", e, eslogger_cmd)
+                anyhow::anyhow!(
+                    "Failed to spawn eslogger process: {}. Command was: {}",
+                    e,
+                    eslogger_cmd
+                )
             })?;
 
         log::info!("Started eslogger process with PID: {:?}", child.id());
@@ -214,10 +248,12 @@ impl Monitor {
                                 // Cache process info
                                 if let Some(p) = pid {
                                     // Extract team_id and signing_id from JSON
-                                    let team_id = json.get("process")
+                                    let team_id = json
+                                        .get("process")
                                         .and_then(|p| p.get("team_id"))
                                         .and_then(|t| t.as_str());
-                                    let signing_id = json.get("process")
+                                    let signing_id = json
+                                        .get("process")
                                         .and_then(|p| p.get("signing_id"))
                                         .and_then(|s| s.as_str());
 
@@ -235,32 +271,47 @@ impl Monitor {
                                 // For protected files, handle immediately
                                 if self.rule_engine.is_protected_file(&file_path) {
                                     // Handle synchronously for speed
-                                    self.handle_file_access_with_signing(&process_path, &file_path, pid, ppid, euid, signing_info)
-                                        .await?;
+                                    self.handle_file_access_with_signing(
+                                        &process_path,
+                                        &file_path,
+                                        pid,
+                                        ppid,
+                                        euid,
+                                        signing_info,
+                                    )
+                                    .await?;
                                 } else {
                                     // Log non-critical events asynchronously
                                     let process_display = process_path.display().to_string();
                                     let pid_str = match (euid, pid) {
                                         (Some(e), Some(p)) => format!("{}@{}", e, p),
                                         (None, Some(p)) => p.to_string(),
-                                        _ => String::from("?")
+                                        _ => String::from("?"),
                                     };
                                     let ppid_str = match ppid {
                                         Some(p) => p.to_string(),
-                                        None => String::from("?")
+                                        None => String::from("?"),
                                     };
                                     let file_display = file_path.display().to_string();
                                     let verbose = self.verbose;
 
                                     tokio::spawn(async move {
                                         if verbose {
-                                            log::info!("{}[{}->{}]: open {}: OK", process_display, pid_str, ppid_str, file_display);
+                                            log::info!(
+                                                "{}[{}->{}]: open {}: OK",
+                                                process_display,
+                                                pid_str,
+                                                ppid_str,
+                                                file_display
+                                            );
                                         }
                                     });
                                 }
                             }
                             Ok(None) => {
-                                log::trace!("Open event parsed but not relevant (directory or filtered)");
+                                log::trace!(
+                                    "Open event parsed but not relevant (directory or filtered)"
+                                );
                             }
                             Err(e) => {
                                 log::debug!("Failed to parse open event: {}", e);
@@ -274,10 +325,12 @@ impl Monitor {
                                 // Cache process info with args
                                 if let Some(p) = pid {
                                     // Extract team_id and signing_id from JSON
-                                    let team_id = json.get("process")
+                                    let team_id = json
+                                        .get("process")
                                         .and_then(|p| p.get("team_id"))
                                         .and_then(|t| t.as_str());
-                                    let signing_id = json.get("process")
+                                    let signing_id = json
+                                        .get("process")
                                         .and_then(|p| p.get("signing_id"))
                                         .and_then(|s| s.as_str());
 
@@ -293,9 +346,19 @@ impl Monitor {
                                 }
 
                                 // Check if any argument contains a protected path
-                                if let Some(protected_path) = self.check_args_for_protected_paths(&args) {
-                                    self.handle_exec_with_protected_path(&process_path, &args, &protected_path, pid, ppid, euid, signing_info)
-                                        .await?;
+                                if let Some(protected_path) =
+                                    self.check_args_for_protected_paths(&args)
+                                {
+                                    self.handle_exec_with_protected_path(
+                                        &process_path,
+                                        &args,
+                                        &protected_path,
+                                        pid,
+                                        ppid,
+                                        euid,
+                                        signing_info,
+                                    )
+                                    .await?;
                                 }
                             }
                             Ok(None) => {
@@ -314,7 +377,11 @@ impl Monitor {
                     if event_count <= 10 {
                         log::warn!("Failed to parse eslogger event #{}: {}", event_count, e);
                     } else {
-                        log::debug!("Failed to parse eslogger event: {} - Event: {}", e, line_clone);
+                        log::debug!(
+                            "Failed to parse eslogger event: {} - Event: {}",
+                            e,
+                            line_clone
+                        );
                     }
                 }
             }
@@ -333,15 +400,23 @@ impl Monitor {
             }
 
             // Check for specific error conditions
-            let error_msg = if stderr_messages.iter().any(|m| m.contains("TCC Full Disk Access") || m.contains("ES_NEW_CLIENT_RESULT_ERR_NOT_PERMITTED")) {
-                log::error!("eslogger requires Full Disk Access permission in macOS System Preferences");
+            let error_msg = if stderr_messages.iter().any(|m| {
+                m.contains("TCC Full Disk Access")
+                    || m.contains("ES_NEW_CLIENT_RESULT_ERR_NOT_PERMITTED")
+            }) {
+                log::error!(
+                    "eslogger requires Full Disk Access permission in macOS System Preferences"
+                );
                 "eslogger requires Full Disk Access permission. Please:\n\
                 1. Open System Preferences -> Security & Privacy -> Privacy tab\n\
                 2. Select 'Full Disk Access' from the left sidebar\n\
                 3. Click the lock to make changes\n\
                 4. Add Terminal.app (or your terminal emulator) to the list\n\
                 5. Restart your terminal and try again"
-            } else if stderr_messages.iter().any(|m| m.contains("Not privileged") || m.contains("ES_NEW_CLIENT_RESULT_ERR_NOT_PRIVILEGED")) {
+            } else if stderr_messages.iter().any(|m| {
+                m.contains("Not privileged")
+                    || m.contains("ES_NEW_CLIENT_RESULT_ERR_NOT_PRIVILEGED")
+            }) {
                 log::error!("eslogger needs to be run with root privileges");
                 "eslogger needs root privileges. Please run with: sudo {}"
             } else {
@@ -349,7 +424,10 @@ impl Monitor {
                 "eslogger exited with error: {}. Command was: eslogger open --format json"
             };
 
-            return Err(anyhow::anyhow!("{}", error_msg.replace("{}", &exit_status.to_string())));
+            return Err(anyhow::anyhow!(
+                "{}",
+                error_msg.replace("{}", &exit_status.to_string())
+            ));
         }
 
         Ok(())
@@ -374,12 +452,12 @@ impl Monitor {
     }
 
     #[cfg(target_os = "macos")]
-    fn parse_open_event(&self, json: &serde_json::Value) -> Result<Option<(PathBuf, PathBuf, Option<u32>, Option<u32>, Option<u32>, Option<String>)>> {
-
+    fn parse_open_event(&self, json: &serde_json::Value) -> Result<OpenEventResult> {
         // This function assumes it's already been verified as an open event
 
         // Check if this is a directory (st_mode & 0170000 == 0040000)
-        let is_directory = json.get("event")
+        let is_directory = json
+            .get("event")
             .and_then(|e| e.get("open"))
             .and_then(|o| o.get("file"))
             .and_then(|f| f.get("stat"))
@@ -394,7 +472,8 @@ impl Monitor {
         }
 
         // Extract process executable path - handle nested structure
-        let process_path = json.get("process")
+        let process_path = json
+            .get("process")
             .and_then(|p| p.get("executable"))
             .and_then(|e| {
                 // The path is nested in an object
@@ -403,7 +482,8 @@ impl Monitor {
             .ok_or_else(|| anyhow::anyhow!("No process path in event"))?;
 
         // Extract file path from the nested structure
-        let file_path = json.get("event")
+        let file_path = json
+            .get("event")
             .and_then(|e| e.get("open"))
             .and_then(|o| o.get("file"))
             .and_then(|f| f.get("path"))
@@ -411,31 +491,36 @@ impl Monitor {
             .ok_or_else(|| anyhow::anyhow!("No file path in event"))?;
 
         // Extract PID from audit_token
-        let pid = json.get("process")
+        let pid = json
+            .get("process")
             .and_then(|p| p.get("audit_token"))
             .and_then(|t| t.get("pid"))
             .and_then(|p| p.as_u64())
             .map(|p| p as u32);
 
         // Extract EUID from audit_token
-        let euid = json.get("process")
+        let euid = json
+            .get("process")
             .and_then(|p| p.get("audit_token"))
             .and_then(|t| t.get("euid"))
             .and_then(|e| e.as_u64())
             .map(|e| e as u32);
 
         // Extract parent PID (ppid)
-        let ppid = json.get("process")
+        let ppid = json
+            .get("process")
             .and_then(|p| p.get("ppid"))
             .and_then(|p| p.as_u64())
             .map(|p| p as u32);
 
         // Extract signing info from eslogger (no filesystem access!)
-        let app_id = json.get("process")
+        let app_id = json
+            .get("process")
             .and_then(|p| p.get("signing_id"))
             .and_then(|s| s.as_str());
 
-        let team_id = json.get("process")
+        let team_id = json
+            .get("process")
             .and_then(|p| p.get("team_id"))
             .and_then(|t| t.as_str());
 
@@ -458,9 +543,10 @@ impl Monitor {
     }
 
     #[cfg(target_os = "macos")]
-    fn parse_exec_event(&self, json: &serde_json::Value) -> Result<Option<(PathBuf, Vec<String>, Option<u32>, Option<u32>, Option<u32>, Option<String>)>> {
+    fn parse_exec_event(&self, json: &serde_json::Value) -> Result<ExecEventResult> {
         // Extract process executable path
-        let process_path = json.get("event")
+        let process_path = json
+            .get("event")
             .and_then(|e| e.get("exec"))
             .and_then(|e| e.get("target"))
             .and_then(|t| t.get("executable"))
@@ -469,7 +555,8 @@ impl Monitor {
             .ok_or_else(|| anyhow::anyhow!("No process path in exec event"))?;
 
         // Extract command-line arguments
-        let args = json.get("event")
+        let args = json
+            .get("event")
             .and_then(|e| e.get("exec"))
             .and_then(|e| e.get("args"))
             .and_then(|a| a.as_array())
@@ -479,34 +566,39 @@ impl Monitor {
                     .map(|s| s.to_string())
                     .collect::<Vec<String>>()
             })
-            .unwrap_or_else(Vec::new);
+            .unwrap_or_default();
 
         // Extract PID from audit_token
-        let pid = json.get("process")
+        let pid = json
+            .get("process")
             .and_then(|p| p.get("audit_token"))
             .and_then(|t| t.get("pid"))
             .and_then(|p| p.as_u64())
             .map(|p| p as u32);
 
         // Extract EUID from audit_token
-        let euid = json.get("process")
+        let euid = json
+            .get("process")
             .and_then(|p| p.get("audit_token"))
             .and_then(|t| t.get("euid"))
             .and_then(|e| e.as_u64())
             .map(|e| e as u32);
 
         // Extract parent PID (ppid)
-        let ppid = json.get("process")
+        let ppid = json
+            .get("process")
             .and_then(|p| p.get("ppid"))
             .and_then(|p| p.as_u64())
             .map(|p| p as u32);
 
         // Extract signing info
-        let app_id = json.get("process")
+        let app_id = json
+            .get("process")
             .and_then(|p| p.get("signing_id"))
             .and_then(|s| s.as_str());
 
-        let team_id = json.get("process")
+        let team_id = json
+            .get("process")
             .and_then(|p| p.get("team_id"))
             .and_then(|t| t.as_str());
 
@@ -553,6 +645,7 @@ impl Monitor {
     }
 
     #[cfg(target_os = "macos")]
+    #[allow(clippy::too_many_arguments)] // TODO: Complete refactor to use parameter struct
     async fn handle_exec_with_protected_path(
         &mut self,
         process_path: &Path,
@@ -586,8 +679,8 @@ impl Monitor {
             ppid,
             team_id: None, // TODO: Parse from signing_info
             app_id: None,  // TODO: Parse from signing_info
-            args: None,    // TODO: Get command-line args
-            uid: None,     // TODO: Get user ID
+            args: Some(args.to_vec()),
+            uid: None, // TODO: Get user ID
             euid,
         };
 
@@ -599,8 +692,10 @@ impl Monitor {
         match decision {
             Decision::Allow => {
                 // Simplified log for allowed exec
-                let mut log_msg = format!("OK: {} exec with {}",
-                    real_process_path.file_name()
+                let mut log_msg = format!(
+                    "OK: {} exec with {}",
+                    real_process_path
+                        .file_name()
                         .and_then(|n| n.to_str())
                         .unwrap_or("unknown"),
                     real_protected_path.display()
@@ -608,13 +703,20 @@ impl Monitor {
 
                 // Add compact 2-level process tree
                 let args_str = args.join(" ");
-                log_msg.push_str(&format!("\n{}", self.build_process_tree_from_cache(
-                    pid, ppid, euid,
-                    real_process_path.file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or("unknown"),
-                    &args_str, 2
-                )));
+                log_msg.push_str(&format!(
+                    "\n{}",
+                    self.build_process_tree_from_cache(
+                        pid,
+                        ppid,
+                        euid,
+                        real_process_path
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("unknown"),
+                        &args_str,
+                        2
+                    )
+                ));
 
                 log::info!("{}", log_msg);
             }
@@ -622,8 +724,10 @@ impl Monitor {
                 match self.mode {
                     Mode::Monitor => {
                         // Simplified header for exec violations
-                        let mut log_msg = format!("DETECTED: {} exec with {}",
-                            real_process_path.file_name()
+                        let mut log_msg = format!(
+                            "DETECTED: {} exec with {}",
+                            real_process_path
+                                .file_name()
                                 .and_then(|n| n.to_str())
                                 .unwrap_or("unknown"),
                             real_protected_path.display()
@@ -631,13 +735,20 @@ impl Monitor {
 
                         // Add detailed 5-level process tree for violations
                         let args_str = args.join(" ");
-                        log_msg.push_str(&format!("\n{}", self.build_process_tree_from_cache(
-                            pid, ppid, euid,
-                            real_process_path.file_name()
-                                .and_then(|n| n.to_str())
-                                .unwrap_or("unknown"),
-                            &args_str, 5
-                        )));
+                        log_msg.push_str(&format!(
+                            "\n{}",
+                            self.build_process_tree_from_cache(
+                                pid,
+                                ppid,
+                                euid,
+                                real_process_path
+                                    .file_name()
+                                    .and_then(|n| n.to_str())
+                                    .unwrap_or("unknown"),
+                                &args_str,
+                                5
+                            )
+                        ));
 
                         log::warn!("{}", log_msg);
                     }
@@ -654,13 +765,20 @@ impl Monitor {
                                         if self.suspend_process(ppid) {
                                             let parent_cmd = self.get_process_cmdline(ppid);
                                             if let Some(ref cmd) = parent_cmd {
-                                                log::info!("Stopped parent process (PID {}): {}", ppid, cmd);
+                                                log::info!(
+                                                    "Stopped parent process (PID {}): {}",
+                                                    ppid,
+                                                    cmd
+                                                );
                                             } else {
                                                 log::info!("Stopped parent process (PID {})", ppid);
                                             }
                                             (true, parent_cmd)
                                         } else {
-                                            log::debug!("Failed to stop parent process (PID {})", ppid);
+                                            log::debug!(
+                                                "Failed to stop parent process (PID {})",
+                                                ppid
+                                            );
                                             (false, None)
                                         }
                                     } else {
@@ -706,13 +824,23 @@ impl Monitor {
                                             if self.suspend_process(ppid) {
                                                 let parent_cmd = self.get_process_cmdline(ppid);
                                                 if let Some(ref cmd) = parent_cmd {
-                                                    log::info!("Stopped parent process (PID {}): {}", ppid, cmd);
+                                                    log::info!(
+                                                        "Stopped parent process (PID {}): {}",
+                                                        ppid,
+                                                        cmd
+                                                    );
                                                 } else {
-                                                    log::info!("Stopped parent process (PID {})", ppid);
+                                                    log::info!(
+                                                        "Stopped parent process (PID {})",
+                                                        ppid
+                                                    );
                                                 }
                                                 true
                                             } else {
-                                                log::debug!("Failed to stop parent process (PID {})", ppid);
+                                                log::debug!(
+                                                    "Failed to stop parent process (PID {})",
+                                                    ppid
+                                                );
                                                 false
                                             }
                                         } else {
@@ -829,7 +957,8 @@ impl Monitor {
             if self.verbose {
                 log::info!(
                     "OK: {} -> {} (not monitored)",
-                    real_process_path.file_name()
+                    real_process_path
+                        .file_name()
                         .and_then(|n| n.to_str())
                         .unwrap_or("unknown"),
                     real_file_path.display()
@@ -858,19 +987,21 @@ impl Monitor {
             .rule_engine
             .check_access_with_context(&context, &real_file_path);
 
-
         match decision {
             Decision::Allow => {
                 // Simplified log for allowed access - just show process->parent
-                let mut log_msg = format!("OK: {} -> {}",
-                    real_process_path.file_name()
+                let mut log_msg = format!(
+                    "OK: {} -> {}",
+                    real_process_path
+                        .file_name()
                         .and_then(|n| n.to_str())
                         .unwrap_or("unknown"),
                     real_file_path.display()
                 );
 
                 // Add compact 2-level process tree
-                let process_name = real_process_path.file_name()
+                let process_name = real_process_path
+                    .file_name()
                     .and_then(|n| n.to_str())
                     .unwrap_or("unknown");
 
@@ -881,9 +1012,10 @@ impl Monitor {
                 };
                 let args_str = cmdline.as_deref().unwrap_or("");
 
-                log_msg.push_str(&format!("\n{}", self.build_process_tree_from_cache(
-                    pid, ppid, euid, process_name, args_str, 2
-                )));
+                log_msg.push_str(&format!(
+                    "\n{}",
+                    self.build_process_tree_from_cache(pid, ppid, euid, process_name, args_str, 2)
+                ));
 
                 log::info!("{}", log_msg);
             }
@@ -900,8 +1032,10 @@ impl Monitor {
                         // Process tree will show parent info
 
                         // Simplified header for violations
-                        let mut log_msg = format!("DETECTED: {} -> {}",
-                            real_process_path.file_name()
+                        let mut log_msg = format!(
+                            "DETECTED: {} -> {}",
+                            real_process_path
+                                .file_name()
                                 .and_then(|n| n.to_str())
                                 .unwrap_or("unknown"),
                             real_file_path.display()
@@ -914,13 +1048,20 @@ impl Monitor {
                         };
 
                         // Add detailed 5-level process tree for violations
-                        log_msg.push_str(&format!("\n{}", self.build_process_tree_from_cache(
-                            pid, ppid, euid,
-                            real_process_path.file_name()
-                                .and_then(|n| n.to_str())
-                                .unwrap_or("unknown"),
-                            args_str, 5
-                        )));
+                        log_msg.push_str(&format!(
+                            "\n{}",
+                            self.build_process_tree_from_cache(
+                                pid,
+                                ppid,
+                                euid,
+                                real_process_path
+                                    .file_name()
+                                    .and_then(|n| n.to_str())
+                                    .unwrap_or("unknown"),
+                                args_str,
+                                5
+                            )
+                        ));
 
                         log::warn!("{}", log_msg);
                     }
@@ -934,18 +1075,26 @@ impl Monitor {
                             // Always try to suspend parent if requested, even if child already exited
                             let (parent_stopped, _parent_cmdline) = if self.stop_parent {
                                 if let Some(ppid) = ppid {
-                                    if ppid > 1 {  // Don't try to stop init (pid 1)
+                                    if ppid > 1 {
+                                        // Don't try to stop init (pid 1)
                                         if self.suspend_process(ppid) {
                                             // Get parent command line after stopping it
                                             let parent_cmd = self.get_process_cmdline(ppid);
                                             if let Some(ref cmd) = parent_cmd {
-                                                log::info!("Stopped parent process (PID {}): {}", ppid, cmd);
+                                                log::info!(
+                                                    "Stopped parent process (PID {}): {}",
+                                                    ppid,
+                                                    cmd
+                                                );
                                             } else {
                                                 log::info!("Stopped parent process (PID {})", ppid);
                                             }
                                             (true, parent_cmd)
                                         } else {
-                                            log::debug!("Failed to stop parent process (PID {})", ppid);
+                                            log::debug!(
+                                                "Failed to stop parent process (PID {})",
+                                                ppid
+                                            );
                                             (false, None)
                                         }
                                     } else {
@@ -988,11 +1137,17 @@ impl Monitor {
 
                                 // Add process tree using cache
                                 log_msg.push_str("\n\nProcess Tree (5 levels):\n");
-                                let process_name = real_process_path.file_name()
+                                let process_name = real_process_path
+                                    .file_name()
                                     .and_then(|n| n.to_str())
                                     .unwrap_or("unknown");
                                 log_msg.push_str(&self.build_process_tree_from_cache(
-                                    Some(pid), ppid, euid, process_name, args_str, 5
+                                    Some(pid),
+                                    ppid,
+                                    euid,
+                                    process_name,
+                                    args_str,
+                                    5,
                                 ));
 
                                 log::error!("{}", log_msg);
@@ -1004,13 +1159,23 @@ impl Monitor {
                                             if self.suspend_process(ppid) {
                                                 let parent_cmd = self.get_process_cmdline(ppid);
                                                 if let Some(ref cmd) = parent_cmd {
-                                                    log::info!("Stopped parent process (PID {}): {}", ppid, cmd);
+                                                    log::info!(
+                                                        "Stopped parent process (PID {}): {}",
+                                                        ppid,
+                                                        cmd
+                                                    );
                                                 } else {
-                                                    log::info!("Stopped parent process (PID {})", ppid);
+                                                    log::info!(
+                                                        "Stopped parent process (PID {})",
+                                                        ppid
+                                                    );
                                                 }
                                                 true
                                             } else {
-                                                log::debug!("Failed to stop parent process (PID {})", ppid);
+                                                log::debug!(
+                                                    "Failed to stop parent process (PID {})",
+                                                    ppid
+                                                );
                                                 false
                                             }
                                         } else {
@@ -1052,7 +1217,8 @@ impl Monitor {
                         {
                             log::error!(
                                 "BLOCKED: {} -> {}",
-                                real_process_path.file_name()
+                                real_process_path
+                                    .file_name()
                                     .and_then(|n| n.to_str())
                                     .unwrap_or("unknown"),
                                 real_file_path.display()
@@ -1135,7 +1301,15 @@ impl Monitor {
     /// Build a visual process tree showing up to 5 levels of parent processes
     /// Also accepts ppid to start from parent if main process has exited
     #[cfg(target_os = "macos")]
-    fn build_process_tree_with_parent(&self, pid: Option<u32>, ppid: Option<u32>, euid: Option<u32>, process_name: &str, args: &str, max_levels: usize) -> String {
+    fn build_process_tree_with_parent(
+        &self,
+        pid: Option<u32>,
+        ppid: Option<u32>,
+        euid: Option<u32>,
+        process_name: &str,
+        args: &str,
+        max_levels: usize,
+    ) -> String {
         use std::process::Command;
 
         let mut tree = Vec::new();
@@ -1146,7 +1320,7 @@ impl Monitor {
         if let Some(p) = pid {
             // Try to get info for the main process first
             let output = Command::new("ps")
-                .args(&["-p", &p.to_string(), "-o", "pid=,ppid=,uid=,comm=,args="])
+                .args(["-p", &p.to_string(), "-o", "pid=,ppid=,uid=,comm=,args="])
                 .output();
 
             if let Ok(output) = output {
@@ -1157,7 +1331,10 @@ impl Monitor {
                     } else {
                         format!("?@{}", p)
                     };
-                    tree.push(format!("→ {} {} [{}] (exited)", process_name, args, uid_str));
+                    tree.push(format!(
+                        "→ {} {} [{}] (exited)",
+                        process_name, args, uid_str
+                    ));
 
                     // Start from parent
                     current_pid = ppid;
@@ -1173,7 +1350,7 @@ impl Monitor {
 
             // Get process info using ps
             let output = Command::new("ps")
-                .args(&["-p", &p.to_string(), "-o", "pid=,ppid=,uid=,comm=,args="])
+                .args(["-p", &p.to_string(), "-o", "pid=,ppid=,uid=,comm=,args="])
                 .output();
 
             if let Ok(output) = output {
@@ -1214,7 +1391,10 @@ impl Monitor {
                             args.to_string()
                         };
 
-                        tree.push(format!("{}{} {} [{}]", indent, prefix, display_args, uid_str));
+                        tree.push(format!(
+                            "{}{} {} [{}]",
+                            indent, prefix, display_args, uid_str
+                        ));
 
                         // Move to parent
                         current_pid = if ppid_val > 1 { Some(ppid_val) } else { None };
@@ -1246,6 +1426,7 @@ impl Monitor {
     }
 
     #[cfg(not(target_os = "macos"))]
+    #[allow(dead_code)] // Will be used for process investigation
     fn build_process_tree(&self, pid: Option<u32>, euid: Option<u32>, max_levels: usize) -> String {
         // Linux implementation using /proc
         let mut tree = Vec::new();
@@ -1274,7 +1455,7 @@ impl Monitor {
             if let Ok(stat) = std::fs::read_to_string(&stat_path) {
                 // Format: pid (comm) state ppid ...
                 if let Some(start) = stat.rfind(')') {
-                    let fields: Vec<&str> = stat[start+1..].split_whitespace().collect();
+                    let fields: Vec<&str> = stat[start + 1..].split_whitespace().collect();
                     if fields.len() > 2 {
                         ppid_val = fields[1].parse().unwrap_or(0);
                     }
@@ -1329,7 +1510,9 @@ impl Monitor {
 
     /// Update the process cache with new information
     #[cfg(target_os = "macos")]
-    fn cache_process_info(&mut self,
+    #[allow(clippy::too_many_arguments)] // TODO: Complete refactor to use parameter struct
+    fn cache_process_info(
+        &mut self,
         pid: u32,
         path: &Path,
         ppid: Option<u32>,
@@ -1343,9 +1526,10 @@ impl Monitor {
             self.cleanup_process_cache();
         }
 
-        let entry = self.process_cache.entry(pid).or_insert_with(|| {
-            ProcessInfo::new(pid, path.to_path_buf())
-        });
+        let entry = self
+            .process_cache
+            .entry(pid)
+            .or_insert_with(|| ProcessInfo::new(pid, path.to_path_buf()));
 
         // Update with latest information
         entry.path = path.to_path_buf();
@@ -1372,8 +1556,13 @@ impl Monitor {
             entry.signing_id = Some(sid.to_string());
         }
 
-        log::trace!("Cached process info for PID {}: {} (ppid: {:?}, euid: {:?})",
-            pid, path.display(), ppid, euid);
+        log::trace!(
+            "Cached process info for PID {}: {} (ppid: {:?}, euid: {:?})",
+            pid,
+            path.display(),
+            ppid,
+            euid
+        );
     }
 
     /// Clean up old entries from the process cache
@@ -1382,9 +1571,8 @@ impl Monitor {
         let now = Instant::now();
         let before_size = self.process_cache.len();
 
-        self.process_cache.retain(|_pid, info| {
-            now.duration_since(info.last_seen) < self.cache_ttl
-        });
+        self.process_cache
+            .retain(|_pid, info| now.duration_since(info.last_seen) < self.cache_ttl);
 
         let removed = before_size - self.process_cache.len();
         if removed > 0 {
@@ -1394,9 +1582,15 @@ impl Monitor {
 
     /// Build a process tree using cached information first, falling back to ps if needed
     #[cfg(target_os = "macos")]
-    fn build_process_tree_from_cache(&self, pid: Option<u32>, ppid: Option<u32>,
-        euid: Option<u32>, process_name: &str, args: &str, max_levels: usize) -> String {
-
+    fn build_process_tree_from_cache(
+        &self,
+        pid: Option<u32>,
+        ppid: Option<u32>,
+        euid: Option<u32>,
+        process_name: &str,
+        args: &str,
+        max_levels: usize,
+    ) -> String {
         let mut tree = Vec::new();
         let mut current_pid = pid;
         let mut level = 0;
@@ -1488,14 +1682,15 @@ impl Monitor {
                 #[cfg(target_os = "macos")]
                 {
                     let output = Command::new("ps")
-                        .args(&["-p", &p.to_string(), "-o", "ppid=,uid=,command="])
+                        .args(["-p", &p.to_string(), "-o", "ppid=,uid=,command="])
                         .output();
 
                     if let Ok(output) = output {
                         if let Ok(line) = String::from_utf8(output.stdout) {
                             let line = line.trim();
                             if !line.is_empty() {
-                                let parts: Vec<&str> = line.splitn(3, ' ')
+                                let parts: Vec<&str> = line
+                                    .splitn(3, ' ')
                                     .map(|s| s.trim())
                                     .filter(|s| !s.is_empty())
                                     .collect();
@@ -1509,7 +1704,10 @@ impl Monitor {
                                     let prefix = "↳";
                                     let uid_str = format!("{}@{}", uid_val, p);
 
-                                    tree.push(format!("{}{} {} [{}]", indent, prefix, cmdline, uid_str));
+                                    tree.push(format!(
+                                        "{}{} {} [{}]",
+                                        indent, prefix, cmdline, uid_str
+                                    ));
 
                                     // Continue to parent, including PID 1 (but not 0)
                                     current_pid = if ppid_val > 0 { Some(ppid_val) } else { None };
@@ -1562,7 +1760,10 @@ impl Monitor {
                     log::debug!("Process PID {} no longer exists (already exited)", pid);
                 }
                 libc::EPERM => {
-                    log::error!("Permission denied suspending PID {} (may be protected by SIP)", pid);
+                    log::error!(
+                        "Permission denied suspending PID {} (may be protected by SIP)",
+                        pid
+                    );
                 }
                 _ => {
                     log::error!("Failed to suspend PID {}: errno {}", pid, errno);
@@ -1598,6 +1799,7 @@ impl Monitor {
     }
 
     #[cfg(not(target_os = "macos"))]
+    #[allow(dead_code)] // Will be used for process investigation
     fn get_process_cmdline(&self, pid: u32) -> Option<String> {
         // On Linux, read from /proc/PID/cmdline
         use std::fs;
@@ -1636,7 +1838,10 @@ impl Monitor {
                     if stderr.contains("No such process") {
                         log::debug!("Process PID {} exited before we could suspend it", pid);
                     } else if stderr.contains("Operation not permitted") {
-                        log::error!("Permission denied suspending PID {} (may be protected)", pid);
+                        log::error!(
+                            "Permission denied suspending PID {} (may be protected)",
+                            pid
+                        );
                     } else {
                         log::error!("Failed to suspend PID {}: {}", pid, stderr.trim());
                     }
@@ -1674,6 +1879,7 @@ impl Monitor {
         }
     }
 
+    #[allow(dead_code)] // Will be used for interactive mode
     async fn handle_interactive_prompt_with_pid(
         &mut self,
         process_path: &Path,
@@ -1758,6 +1964,7 @@ impl Monitor {
         }
     }
 
+    #[allow(dead_code)] // Will be used for debugging
     fn show_process_info(&self, process_path: &Path) {
         println!("\nAdditional Information:");
         println!("  Full path: {}", process_path.display());
@@ -1767,6 +1974,7 @@ impl Monitor {
         println!("  Note: Code signing info available in event logs");
     }
 
+    #[allow(dead_code)] // Will be used for debugging
     fn show_process_status(&self, #[allow(unused_variables)] pid: u32) {
         #[cfg(target_os = "macos")]
         {
@@ -1799,7 +2007,8 @@ impl Monitor {
         log::info!("Using fanotify mechanism");
 
         // Use the Linux-specific monitor implementation
-        let mut linux_monitor = LinuxMonitor::new(self.mode.clone(), self.verbose, self.stop_parent);
+        let mut linux_monitor =
+            LinuxMonitor::new(self.mode.clone(), self.verbose, self.stop_parent);
         linux_monitor.start().await
     }
 

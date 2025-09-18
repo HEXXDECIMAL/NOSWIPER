@@ -63,11 +63,21 @@ pub enum Mechanism {
     /// Use eBPF (more powerful, requires newer kernel)
     Ebpf,
 
-    #[cfg(any(target_os = "freebsd", target_os = "netbsd", target_os = "illumos", target_os = "solaris"))]
+    #[cfg(any(
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "illumos",
+        target_os = "solaris"
+    ))]
     /// Use DTrace for monitoring (requires DTrace support)
     Dtrace,
 
-    #[cfg(any(target_os = "freebsd", target_os = "netbsd", target_os = "openbsd", target_os = "dragonfly"))]
+    #[cfg(any(
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd",
+        target_os = "dragonfly"
+    ))]
     /// Use kqueue for monitoring (native BSD API)
     Kqueue,
 }
@@ -145,9 +155,19 @@ impl std::fmt::Display for Mechanism {
             Mechanism::Fanotify => write!(f, "fanotify"),
             #[cfg(target_os = "linux")]
             Mechanism::Ebpf => write!(f, "ebpf"),
-            #[cfg(any(target_os = "freebsd", target_os = "netbsd", target_os = "illumos", target_os = "solaris"))]
+            #[cfg(any(
+                target_os = "freebsd",
+                target_os = "netbsd",
+                target_os = "illumos",
+                target_os = "solaris"
+            ))]
             Mechanism::Dtrace => write!(f, "dtrace"),
-            #[cfg(any(target_os = "freebsd", target_os = "netbsd", target_os = "openbsd", target_os = "dragonfly"))]
+            #[cfg(any(
+                target_os = "freebsd",
+                target_os = "netbsd",
+                target_os = "openbsd",
+                target_os = "dragonfly"
+            ))]
             Mechanism::Kqueue => write!(f, "kqueue"),
         }
     }

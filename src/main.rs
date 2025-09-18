@@ -14,7 +14,12 @@ mod linux_monitor;
 #[cfg(target_os = "freebsd")]
 mod freebsd_monitor;
 
-#[cfg(any(target_os = "freebsd", target_os = "netbsd", target_os = "illumos", target_os = "solaris"))]
+#[cfg(any(
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "illumos",
+    target_os = "solaris"
+))]
 mod dtrace_monitor;
 
 use anyhow::Result;
@@ -57,7 +62,12 @@ async fn main() -> Result<()> {
     info!("Mechanism: {}", args.get_mechanism());
 
     // Create and start monitor
-    let mut monitor = Monitor::new(args.get_mode(), args.get_mechanism(), args.verbose, args.stop_parent);
+    let mut monitor = Monitor::new(
+        args.get_mode(),
+        args.get_mechanism(),
+        args.verbose,
+        args.stop_parent,
+    );
 
     // Handle shutdown gracefully
     let shutdown_result = tokio::select! {

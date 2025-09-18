@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use crate::allow_rule::AllowRule;
+use serde::{Deserialize, Serialize};
 
 // Embed the OS-specific configurations at compile time
 #[cfg(target_os = "macos")]
@@ -17,7 +17,13 @@ const DEFAULT_CONFIG_YAML: &str = include_str!("../config/netbsd.yaml");
 #[cfg(target_os = "openbsd")]
 const DEFAULT_CONFIG_YAML: &str = include_str!("../config/openbsd.yaml");
 
-#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd")))]
+#[cfg(not(any(
+    target_os = "macos",
+    target_os = "linux",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd"
+)))]
 const DEFAULT_CONFIG_YAML: &str = include_str!("../config/default.yaml");
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -26,7 +32,7 @@ pub struct Config {
     pub excluded_patterns: Vec<String>,
     #[serde(default)]
     pub global_exclusions: Vec<AllowRule>,
-    #[serde(alias = "allowed_paths")]  // For backward compatibility
+    #[serde(alias = "allowed_paths")] // For backward compatibility
     pub default_base_paths: Vec<String>,
     pub monitoring: MonitoringConfig,
 }
@@ -72,11 +78,12 @@ impl Config {
     }
 
     /// Load configuration from a file, merging with defaults
-    #[allow(dead_code)]  // Will be used for user overrides
+    #[allow(dead_code)] // Will be used for user overrides
     pub fn from_file(path: &std::path::Path) -> Result<Self, Box<dyn std::error::Error>> {
         let contents = std::fs::read_to_string(path)?;
         let user_config: Config = serde_yaml::from_str(&contents)?;
-        user_config.validate_global_exclusions()
+        user_config
+            .validate_global_exclusions()
             .map_err(|e| format!("Configuration validation failed: {}", e))?;
 
         // For now, just return the user config
@@ -98,7 +105,6 @@ impl Config {
         }
         Ok(())
     }
-
 
     /// Check if a file matches a pattern (with glob support)
     fn matches_pattern(&self, pattern: &str, file_path: &str) -> bool {
