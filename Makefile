@@ -10,31 +10,39 @@ OUT_DIR = out
 INSTALL_DIR = /usr/local/bin
 VERSION = $(shell grep version Cargo.toml | head -1 | cut -d'"' -f2)
 
-# Platform detection
-UNAME_S := $(shell uname -s)
-UNAME_M := $(shell uname -m)
+# Platform detection (portable for BSD/GNU make)
+UNAME_S = $(shell uname -s)
+UNAME_M = $(shell uname -m)
 
 # Default target - build release binary to out/ directory
 .DEFAULT_GOAL := release
 
-# Determine target triple
-ifeq ($(UNAME_S),Darwin)
-	ifeq ($(UNAME_M),arm64)
-		TARGET = aarch64-apple-darwin
-	else
-		TARGET = x86_64-apple-darwin
-	endif
-	PLATFORM = macos
-else ifeq ($(UNAME_S),Linux)
-	ifeq ($(UNAME_M),aarch64)
-		TARGET = aarch64-unknown-linux-gnu
-	else
-		TARGET = x86_64-unknown-linux-gnu
-	endif
-	PLATFORM = linux
-else
-	$(error Unsupported platform: $(UNAME_S))
-endif
+# Determine target triple and platform using shell commands
+TARGET = $(shell \
+	if [ "$(UNAME_S)" = "Darwin" ]; then \
+		if [ "$(UNAME_M)" = "arm64" ]; then \
+			echo "aarch64-apple-darwin"; \
+		else \
+			echo "x86_64-apple-darwin"; \
+		fi; \
+	elif [ "$(UNAME_S)" = "Linux" ]; then \
+		if [ "$(UNAME_M)" = "aarch64" ]; then \
+			echo "aarch64-unknown-linux-gnu"; \
+		else \
+			echo "x86_64-unknown-linux-gnu"; \
+		fi; \
+	else \
+		echo "unknown-target"; \
+	fi)
+
+PLATFORM = $(shell \
+	if [ "$(UNAME_S)" = "Darwin" ]; then \
+		echo "macos"; \
+	elif [ "$(UNAME_S)" = "Linux" ]; then \
+		echo "linux"; \
+	else \
+		echo "unknown"; \
+	fi)
 
 # Build output paths
 RELEASE_BINARY = target/release/$(BINARY_NAME)
