@@ -617,8 +617,18 @@ impl LinuxMonitor {
             return Ok(());
         }
 
-        // Get process information
-        let process_path = self.get_process_path(metadata.pid)?;
+        // Get process information - handle case where process already exited
+        let process_path = match self.get_process_path(metadata.pid) {
+            Ok(path) => path,
+            Err(e) => {
+                // Process may have already exited - this is normal for short-lived processes
+                log::warn!("Process PID {} already exited, allowing access: {}", metadata.pid, e);
+                // Allow the access since we can't verify the process
+                self.respond_to_event(metadata.fd, FAN_ALLOW)?;
+                unsafe { libc::close(metadata.fd) };
+                return Ok(());
+            }
+        };
 
         log::info!(
             "PROTECTED FILE ACCESS: {} (PID {}) -> {}",
@@ -706,33 +716,43 @@ impl LinuxMonitor {
             return Ok(path.clone());
         }
 
+        // Special case for kernel threads (PID 0)
+        if pid == 0 {
+            return Ok(PathBuf::from("[kernel]"));
+        }
+
         // Read from /proc/PID/exe
         let proc_exe = format!("/proc/{}/exe", pid);
         match std::fs::read_link(&proc_exe) {
             Ok(path) => {
-                self.pid_cache.insert(pid, path.clone());
-                Ok(path)
+                // Some paths have " (deleted)" suffix if the binary was deleted
+                let path_str = path.to_string_lossy();
+                let clean_path = if path_str.ends_with(" (deleted)") {
+                    PathBuf::from(path_str.trim_end_matches(" (deleted)"))
+                } else {
+                    path
+                };
+                self.pid_cache.insert(pid, clean_path.clone());
+                Ok(clean_path)
             }
-            Err(e) => {
-                log::debug!("Failed to read process path for PID {}: {}", pid, e);
+            Err(_) => {
                 // Try cmdline as fallback
                 let proc_cmdline = format!("/proc/{}/cmdline", pid);
                 match std::fs::read_to_string(&proc_cmdline) {
-                    Ok(cmdline) => {
+                    Ok(cmdline) if !cmdline.is_empty() => {
                         let parts: Vec<&str> = cmdline.split('\0').collect();
                         if !parts.is_empty() && !parts[0].is_empty() {
                             let path = PathBuf::from(parts[0]);
                             self.pid_cache.insert(pid, path.clone());
                             Ok(path)
                         } else {
-                            Err(anyhow::anyhow!("Empty cmdline for PID {}", pid))
+                            Err(anyhow::anyhow!("Process {} has empty cmdline", pid))
                         }
                     }
-                    Err(e) => Err(anyhow::anyhow!(
-                        "Failed to read cmdline for PID {}: {}",
-                        pid,
-                        e
-                    )),
+                    _ => {
+                        // Process doesn't exist or we can't read it
+                        Err(anyhow::anyhow!("Process {} not found or not readable", pid))
+                    }
                 }
             }
         }
