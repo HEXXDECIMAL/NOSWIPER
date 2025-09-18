@@ -63,15 +63,15 @@ impl AllowRule {
     ) -> bool {
         // All specified conditions must match (AND logic)
 
-        // Check basename
+        // Check basename (supports wildcards)
         if let Some(ref expected_basename) = self.base {
             let actual_basename = process_path
                 .file_name()
                 .and_then(|n| n.to_str())
                 .unwrap_or("");
 
-            if actual_basename != expected_basename {
-                log::debug!("Rule failed: basename mismatch. Expected '{}', got '{}'", expected_basename, actual_basename);
+            if !matches_pattern(expected_basename, actual_basename) {
+                log::debug!("Rule failed: basename pattern '{}' doesn't match '{}'", expected_basename, actual_basename);
                 return false;
             }
         }
@@ -220,6 +220,16 @@ mod tests {
         assert!(!matches_pattern("com.apple.*", "com.google.chrome"));
         assert!(matches_pattern("firefox", "firefox"));
         assert!(!matches_pattern("firefox", "chrome"));
+
+        // Test basename wildcards
+        assert!(matches_pattern("docker-credential-*", "docker-credential-desktop"));
+        assert!(matches_pattern("docker-credential-*", "docker-credential-pass"));
+        assert!(!matches_pattern("docker-credential-*", "docker-compose"));
+        assert!(matches_pattern("pinentry*", "pinentry"));
+        assert!(matches_pattern("pinentry*", "pinentry-gtk-2"));
+        assert!(matches_pattern("python*", "python3"));
+        assert!(matches_pattern("python*", "python3.11"));
+        assert!(!matches_pattern("python*", "ruby"));
     }
 
     #[test]

@@ -1,7 +1,23 @@
 use serde::{Deserialize, Serialize};
 use crate::allow_rule::AllowRule;
 
-// Embed the default configuration at compile time
+// Embed the OS-specific configurations at compile time
+#[cfg(target_os = "macos")]
+const DEFAULT_CONFIG_YAML: &str = include_str!("../config/macos.yaml");
+
+#[cfg(target_os = "linux")]
+const DEFAULT_CONFIG_YAML: &str = include_str!("../config/linux.yaml");
+
+#[cfg(target_os = "freebsd")]
+const DEFAULT_CONFIG_YAML: &str = include_str!("../config/freebsd.yaml");
+
+#[cfg(target_os = "netbsd")]
+const DEFAULT_CONFIG_YAML: &str = include_str!("../config/netbsd.yaml");
+
+#[cfg(target_os = "openbsd")]
+const DEFAULT_CONFIG_YAML: &str = include_str!("../config/openbsd.yaml");
+
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd")))]
 const DEFAULT_CONFIG_YAML: &str = include_str!("../config/default.yaml");
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -11,7 +27,7 @@ pub struct Config {
     #[serde(default)]
     pub global_exclusions: Vec<AllowRule>,
     #[serde(alias = "allowed_paths")]  // For backward compatibility
-    pub default_base_paths: DefaultBasePaths,
+    pub default_base_paths: Vec<String>,
     pub monitoring: MonitoringConfig,
 }
 
@@ -39,24 +55,6 @@ impl ProtectedFile {
             PatternsConfig::Multiple { patterns } => patterns.clone(),
         }
     }
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct DefaultBasePaths {
-    #[serde(default)]
-    pub macos: Vec<String>,
-    #[serde(default)]
-    pub linux: Vec<String>,
-    #[serde(default)]
-    pub freebsd: Vec<String>,
-    #[serde(default)]
-    pub netbsd: Vec<String>,
-    #[serde(default)]
-    pub openbsd: Vec<String>,
-    #[serde(default)]
-    pub illumos: Vec<String>,
-    #[serde(default)]
-    pub solaris: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -118,39 +116,7 @@ impl Config {
     pub fn is_allowed_path(&self, path: &std::path::Path) -> bool {
         let path_str = path.to_string_lossy();
 
-        #[cfg(target_os = "macos")]
-        let allowed_paths = &self.default_base_paths.macos;
-
-        #[cfg(target_os = "linux")]
-        let allowed_paths = &self.default_base_paths.linux;
-
-        #[cfg(target_os = "freebsd")]
-        let allowed_paths = &self.default_base_paths.freebsd;
-
-        #[cfg(target_os = "netbsd")]
-        let allowed_paths = &self.default_base_paths.netbsd;
-
-        #[cfg(target_os = "openbsd")]
-        let allowed_paths = &self.default_base_paths.openbsd;
-
-        #[cfg(target_os = "illumos")]
-        let allowed_paths = &self.default_base_paths.illumos;
-
-        #[cfg(target_os = "solaris")]
-        let allowed_paths = &self.default_base_paths.solaris;
-
-        #[cfg(not(any(
-            target_os = "macos",
-            target_os = "linux",
-            target_os = "freebsd",
-            target_os = "netbsd",
-            target_os = "openbsd",
-            target_os = "illumos",
-            target_os = "solaris"
-        )))]
-        let allowed_paths = &Vec::<String>::new();
-
-        for allowed in allowed_paths {
+        for allowed in &self.default_base_paths {
             let expanded = shellexpand::tilde(allowed);
             // Handle patterns with wildcards
             if expanded.contains('*') {

@@ -1,0 +1,336 @@
+# NoSwiper OpenBSD Configuration
+# This file is embedded at compile time and provides the default rules for OpenBSD
+# Users can override these with ~/.config/noswiper/config.yaml
+
+# Global exclusions - processes that can access ANY protected file
+# IMPORTANT: Every global exclusion MUST have a hardcoded path_pattern
+#   - Additional restrictions like base and ppid are recommended
+# Without path_pattern, a rule could match any process!
+global_exclusions:
+  # Backup programs
+  - base: "rsync"
+    path_pattern: "/usr/local/bin/rsync"
+  - base: "rsyncd"
+    path_pattern: "/usr/local/*bin/rsyncd"
+  - base: "dump"  # OpenBSD backup utility
+    path_pattern: "/sbin/dump"
+  - base: "restore"
+    path_pattern: "/sbin/restore"
+  - base: "duplicity"
+    path_pattern: "/usr/local/bin/duplicity"
+  - base: "borg"
+    path_pattern: "/usr/local/bin/borg"
+  - base: "restic"
+    path_pattern: "/usr/local/bin/restic"
+
+  # Cloud sync services
+  - base: "syncthing"
+    path_pattern: "/usr/local/bin/syncthing"
+    ppid: 1
+  - base: "rclone"
+    path_pattern: "/usr/local/bin/rclone"
+
+# Files and patterns to protect
+protected_files:
+  # SSH Keys and Known Hosts
+  - id: ssh_keys
+    patterns:
+      - "~/.ssh/id_*"
+      - "~/.ssh/*_key"
+    allow:
+      # SSH tools
+      - base: "ssh"
+      - base: "ssh-add"
+      - base: "ssh-agent"
+      - base: "ssh-keygen"
+      - base: "scp"
+      - base: "sftp"
+      - base: "sshd"
+      - base: "git"
+      - base: "rsync"
+
+  # SSH Known Hosts (used for lateral movement/reconnaissance)
+  - id: ssh_known_hosts
+    pattern: "~/.ssh/known_hosts"
+    allow:
+      # SSH tools that actually read/write known_hosts
+      - base: "ssh"
+      - base: "ssh-keygen"
+      - base: "ssh-keyscan"
+      - base: "scp"
+      - base: "sftp"
+      # Git (updates known_hosts when cloning)
+      - base: "git"
+      # rsync over SSH
+      - base: "rsync"
+      # Zsh (reads known_hosts for tab completion)
+      - base: "zsh"
+
+  # AWS Credentials
+  - id: aws_credentials
+    patterns:
+      - "~/.aws/credentials"
+      - "~/.aws/config"
+    allow:
+      - base: "aws"
+        path_pattern: "/usr/local/bin/aws"
+      - base: "terraform"
+        path_pattern: "/usr/local/bin/terraform"
+      - base: "ansible"
+        path_pattern: "/usr/local/bin/ansible*"
+      - base: "ansible-playbook"
+        path_pattern: "/usr/local/bin/ansible-playbook"
+      - base: "packer"
+        path_pattern: "/usr/local/bin/packer"
+      # Python for boto3
+      - base: "python*"
+        path_pattern: "/usr/local/bin/python*"
+      - base: "python3"
+        path_pattern: "~/.venv/*/bin/*"
+
+  # Google Cloud
+  - id: gcloud_credentials
+    patterns:
+      - "~/.config/gcloud/credentials.db"
+      - "~/.config/gcloud/access_tokens.db"
+    allow:
+      - base: "gcloud"
+        path_pattern: "/usr/local/bin/gcloud"
+      - base: "gsutil"
+      - base: "bq"
+      - base: "kubectl"
+        path_pattern: "/usr/local/bin/kubectl"
+      - base: "python*"
+        path_pattern: "/usr/local/bin/python*"
+
+  # Azure
+  - id: azure_credentials
+    patterns:
+      - "~/.azure/accessTokens.json"
+    allow:
+      - base: "az"
+        path_pattern: "/usr/local/bin/az"
+      - base: "azure-cli"
+
+  # GPG Keys
+  - id: gpg_keys
+    patterns:
+      - "~/.gnupg/private-keys*"
+      - "~/.gnupg/secring.gpg"
+    allow:
+      - base: "gpg"
+      - base: "gpg2"
+      - base: "gpg-agent"
+      - base: "pinentry*"
+      - base: "pass"
+        path_pattern: "/usr/local/bin/pass"
+
+  # Package Manager Credentials
+  - id: npm_credentials
+    patterns:
+      - "~/.npmrc"
+    allow:
+      - base: "npm"
+        path_pattern: "/usr/local/bin/npm"
+      - base: "node"
+        path_pattern: "/usr/local/bin/node"
+      - base: "yarn"
+        path_pattern: "/usr/local/bin/yarn"
+
+  - id: python_credentials
+    patterns:
+      - "~/.pypirc"
+    allow:
+      - base: "python*"
+        path_pattern: "/usr/local/bin/python*"
+      - base: "pip*"
+        path_pattern: "/usr/local/bin/pip*"
+      - base: "easy_install*"
+        path_pattern: "/usr/local/bin/easy_install*"
+
+  - id: cargo_credentials
+    patterns:
+      - "~/.cargo/credentials"
+    allow:
+      - base: "cargo"
+        path_pattern: "~/.cargo/bin/cargo"
+      - base: "rustc"
+        path_pattern: "~/.cargo/bin/rustc"
+      - base: "rustup"
+        path_pattern: "~/.cargo/bin/rustup"
+
+  # Kubernetes
+  - id: kubernetes_config
+    patterns:
+      - "~/.kube/config"
+    allow:
+      - base: "kubectl"
+        path_pattern: "/usr/local/bin/kubectl"
+      - base: "helm"
+        path_pattern: "/usr/local/bin/helm"
+      - base: "k9s"
+        path_pattern: "/usr/local/bin/k9s"
+
+  # Browser Password Stores - Firefox
+  - id: firefox_passwords
+    patterns:
+      - "~/.mozilla/firefox/*/logins.json"
+      - "~/.mozilla/firefox/*/key*.db"
+      - "~/.mozilla/firefox/*/cookies.sqlite"
+    allow:
+      - base: "firefox"
+        path_pattern: "/usr/local/bin/firefox"
+        ppid: 1
+      - base: "firefox-esr"
+        path_pattern: "/usr/local/bin/firefox-esr"
+        ppid: 1
+
+  # Chromium (OpenBSD packages ungoogled-chromium)
+  - id: chromium_passwords
+    patterns:
+      - "~/.config/chromium/*/Login Data"
+      - "~/.config/chromium/*/Cookies"
+      - "~/.config/chromium/*/Web Data"
+    allow:
+      - base: "chrome"
+        path_pattern: "/usr/local/bin/chrome"
+        ppid: 1
+      - base: "chromium"
+        path_pattern: "/usr/local/bin/chromium"
+        ppid: 1
+      - base: "ungoogled-chromium"
+        path_pattern: "/usr/local/bin/ungoogled-chromium"
+        ppid: 1
+
+  # Iridium browser (privacy-focused Chromium fork, available on OpenBSD)
+  - id: iridium_passwords
+    patterns:
+      - "~/.config/iridium/*/Login Data"
+      - "~/.config/iridium/*/Cookies"
+      - "~/.config/iridium/*/Web Data"
+    allow:
+      - base: "iridium"
+        path_pattern: "/usr/local/bin/iridium"
+        ppid: 1
+
+  # Password Managers
+  - pattern: "~/.password-store/**/*.gpg"
+    allow:
+      - base: "pass"
+        path_pattern: "/usr/local/bin/pass"
+      - base: "gpg"
+      - base: "gpg2"
+
+  - pattern: "~/.config/keepassxc/*.kdbx"
+    allow:
+      - base: "keepassxc"
+        path_pattern: "/usr/local/bin/keepassxc"
+        ppid: 1
+
+  # Email Clients
+  - pattern: "~/.thunderbird/*/logins.json"
+    allow:
+      - base: "thunderbird"
+        path_pattern: "/usr/local/bin/thunderbird"
+        ppid: 1
+
+  - pattern: "~/.claws-mail/accountrc"
+    allow:
+      - base: "claws-mail"
+        path_pattern: "/usr/local/bin/claws-mail"
+        ppid: 1
+
+  # Development Tools
+  - pattern: "~/.config/filezilla/sitemanager.xml"
+    allow:
+      - base: "filezilla"
+        path_pattern: "/usr/local/bin/filezilla"
+        ppid: 1
+
+  # VPN Configurations
+  - id: vpn_configs
+    patterns:
+      - "~/.config/openvpn/*"
+      - "/etc/openvpn/*"
+    allow:
+      - base: "openvpn"
+        path_pattern: "/usr/local/sbin/openvpn"
+
+  # WireGuard (OpenBSD has native support)
+  - id: wireguard_configs
+    patterns:
+      - "/etc/wireguard/*.conf"
+    allow:
+      - base: "wg"
+        path_pattern: "/usr/local/bin/wg"
+      - base: "wg-quick"
+        path_pattern: "/usr/local/bin/wg-quick"
+
+  # Shell History Files
+  - id: shell_history
+    patterns:
+      - "~/.bash_history"
+      - "~/.zsh_history"
+      - "~/.history"  # ksh/sh
+      - "~/.local/share/fish/fish_history"
+    allow:
+      # Only shells themselves should read/write their history
+      - base: "bash"
+      - base: "zsh"
+      - base: "fish"
+      - base: "sh"
+      - base: "ksh"  # OpenBSD's default shell
+      - base: "csh"
+      - base: "tcsh"
+
+  # OpenBSD package database
+  - pattern: "/var/db/pkg/*"
+    allow:
+      - base: "pkg_*"  # pkg_add, pkg_delete, pkg_info
+        path_pattern: "/usr/sbin/pkg_*"
+
+  # OpenBSD firmware files
+  - pattern: "/etc/firmware/*"
+    allow:
+      - base: "fw_update"
+        path_pattern: "/usr/sbin/fw_update"
+
+  # OpenBSD signify keys (used for package verification)
+  - pattern: "/etc/signify/*"
+    allow:
+      - base: "signify"
+        path_pattern: "/usr/bin/signify"
+      - base: "pkg_add"
+        path_pattern: "/usr/sbin/pkg_add"
+
+  # doas configuration (OpenBSD's sudo replacement)
+  - pattern: "/etc/doas.conf"
+    allow:
+      - base: "doas"
+        path_pattern: "/usr/bin/doas"
+      - base: "vi"  # Common editor
+        path_pattern: "/usr/bin/vi"
+      - base: "mg"  # OpenBSD's Emacs-like editor
+        path_pattern: "/usr/bin/mg"
+
+# Patterns to exclude from monitoring (not sensitive)
+excluded_patterns:
+  - "*.pub"               # Public keys
+  - "*.pem"              # Often certificates (though could be private keys)
+  - "authorized_keys"     # SSH authorized keys file
+
+# Default base paths for OpenBSD
+default_base_paths:
+  - /usr/bin
+  - /bin
+  - /usr/sbin
+  - /sbin
+  - /usr/local/bin  # OpenBSD packages install here
+  - /usr/local/sbin
+  - /usr/X11R6/bin  # X11 binaries
+  - ~/.local/bin
+
+# Monitoring configuration
+monitoring:
+  buffer_size: 1000
+  max_events_per_sec: 100
