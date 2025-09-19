@@ -74,6 +74,11 @@ impl AllowRule {
     /// Check if this rule matches the given process context, with config for default paths
     #[allow(dead_code)] // Will be used when monitor is updated
     pub fn matches_with_config(&self, context: &ProcessContext, config: Option<&Config>) -> bool {
+        self.matches_with_config_and_debug(context, config, false)
+    }
+
+    /// Check if this rule matches with optional debug logging
+    pub fn matches_with_config_and_debug(&self, context: &ProcessContext, config: Option<&Config>, debug: bool) -> bool {
         // All specified conditions must match (AND logic)
 
         // Check basename (supports wildcards)
@@ -85,11 +90,13 @@ impl AllowRule {
                 .unwrap_or("");
 
             if !matches_pattern(expected_basename, actual_basename) {
-                log::debug!(
-                    "Rule failed: basename pattern '{}' doesn't match '{}'",
-                    expected_basename,
-                    actual_basename
-                );
+                if debug {
+                    log::debug!(
+                        "Rule failed: basename pattern '{}' doesn't match '{}'",
+                        expected_basename,
+                        actual_basename
+                    );
+                }
                 return false;
             }
         }
@@ -98,18 +105,22 @@ impl AllowRule {
         if let Some(ref pattern) = self.path {
             let path_str = context.path.to_string_lossy();
             if !matches_pattern(pattern, &path_str) {
-                log::debug!(
-                    "Rule failed: path pattern '{}' doesn't match '{}'",
-                    pattern,
-                    path_str
-                );
+                if debug {
+                    log::debug!(
+                        "Rule failed: path pattern '{}' doesn't match '{}'",
+                        pattern,
+                        path_str
+                    );
+                }
                 return false;
             }
         } else if self.base.is_some() && self.path.is_none() {
             // If base is specified but no path, check against default paths
             if let Some(cfg) = config {
-                if !cfg.is_allowed_path(&context.path) {
-                    log::debug!("Rule failed: basename specified but process path '{}' not in default base paths", context.path.display());
+                if !cfg.is_allowed_path_with_debug(&context.path, debug) {
+                    if debug {
+                        log::debug!("Rule failed: basename specified but process path '{}' not in default base paths", context.path.display());
+                    }
                     return false;
                 }
             }
@@ -118,11 +129,13 @@ impl AllowRule {
         // Check ppid
         if let Some(expected_ppid) = self.ppid {
             if context.ppid != Some(expected_ppid) {
-                log::debug!(
-                    "Rule failed: ppid mismatch. Expected {}, got {:?}",
-                    expected_ppid,
-                    context.ppid
-                );
+                if debug {
+                    log::debug!(
+                        "Rule failed: ppid mismatch. Expected {}, got {:?}",
+                        expected_ppid,
+                        context.ppid
+                    );
+                }
                 return false;
             }
         }
@@ -132,19 +145,23 @@ impl AllowRule {
             match &context.team_id {
                 Some(actual_team_id) => {
                     if !matches_pattern(expected_team_id, actual_team_id) {
-                        log::debug!(
-                            "Rule failed: team_id pattern '{}' doesn't match '{}'",
-                            expected_team_id,
-                            actual_team_id
-                        );
+                        if debug {
+                            log::debug!(
+                                "Rule failed: team_id pattern '{}' doesn't match '{}'",
+                                expected_team_id,
+                                actual_team_id
+                            );
+                        }
                         return false;
                     }
                 }
                 None => {
-                    log::debug!(
-                        "Rule failed: expected team_id '{}' but none provided",
-                        expected_team_id
-                    );
+                    if debug {
+                        log::debug!(
+                            "Rule failed: expected team_id '{}' but none provided",
+                            expected_team_id
+                        );
+                    }
                     return false;
                 }
             }
@@ -155,19 +172,23 @@ impl AllowRule {
             match &context.app_id {
                 Some(actual_app_id) => {
                     if !matches_pattern(expected_app_id, actual_app_id) {
-                        log::debug!(
-                            "Rule failed: app_id pattern '{}' doesn't match '{}'",
-                            expected_app_id,
-                            actual_app_id
-                        );
+                        if debug {
+                            log::debug!(
+                                "Rule failed: app_id pattern '{}' doesn't match '{}'",
+                                expected_app_id,
+                                actual_app_id
+                            );
+                        }
                         return false;
                     }
                 }
                 None => {
-                    log::debug!(
-                        "Rule failed: expected app_id '{}' but none provided",
-                        expected_app_id
-                    );
+                    if debug {
+                        log::debug!(
+                            "Rule failed: expected app_id '{}' but none provided",
+                            expected_app_id
+                        );
+                    }
                     return false;
                 }
             }
@@ -179,19 +200,23 @@ impl AllowRule {
                 Some(actual_args) => {
                     let args_str = actual_args.join(" ");
                     if !matches_pattern(pattern, &args_str) {
-                        log::debug!(
-                            "Rule failed: args pattern '{}' doesn't match '{}'",
-                            pattern,
-                            args_str
-                        );
+                        if debug {
+                            log::debug!(
+                                "Rule failed: args pattern '{}' doesn't match '{}'",
+                                pattern,
+                                args_str
+                            );
+                        }
                         return false;
                     }
                 }
                 None => {
-                    log::debug!(
-                        "Rule failed: expected args pattern '{}' but no args provided",
-                        pattern
-                    );
+                    if debug {
+                        log::debug!(
+                            "Rule failed: expected args pattern '{}' but no args provided",
+                            pattern
+                        );
+                    }
                     return false;
                 }
             }
@@ -202,19 +227,23 @@ impl AllowRule {
             match &context.args {
                 Some(actual_args) => {
                     if !actual_args.contains(expected_arg) {
-                        log::debug!(
-                            "Rule failed: required arg '{}' not found in {:?}",
-                            expected_arg,
-                            actual_args
-                        );
+                        if debug {
+                            log::debug!(
+                                "Rule failed: required arg '{}' not found in {:?}",
+                                expected_arg,
+                                actual_args
+                            );
+                        }
                         return false;
                     }
                 }
                 None => {
-                    log::debug!(
-                        "Rule failed: expected arg '{}' but no args provided",
-                        expected_arg
-                    );
+                    if debug {
+                        log::debug!(
+                            "Rule failed: expected arg '{}' but no args provided",
+                            expected_arg
+                        );
+                    }
                     return false;
                 }
             }
@@ -223,11 +252,13 @@ impl AllowRule {
         // Check uid
         if let Some(expected_uid) = self.uid {
             if context.uid != Some(expected_uid) {
-                log::debug!(
-                    "Rule failed: uid mismatch. Expected {}, got {:?}",
-                    expected_uid,
-                    context.uid
-                );
+                if debug {
+                    log::debug!(
+                        "Rule failed: uid mismatch. Expected {}, got {:?}",
+                        expected_uid,
+                        context.uid
+                    );
+                }
                 return false;
             }
         }
@@ -237,21 +268,25 @@ impl AllowRule {
             match context.euid {
                 Some(actual_euid) => {
                     if actual_euid < min_euid || actual_euid > max_euid {
-                        log::debug!(
-                            "Rule failed: euid {} not in range {}-{}",
-                            actual_euid,
-                            min_euid,
-                            max_euid
-                        );
+                        if debug {
+                            log::debug!(
+                                "Rule failed: euid {} not in range {}-{}",
+                                actual_euid,
+                                min_euid,
+                                max_euid
+                            );
+                        }
                         return false;
                     }
                 }
                 None => {
-                    log::debug!(
-                        "Rule failed: expected euid in range {}-{} but none provided",
-                        min_euid,
-                        max_euid
-                    );
+                    if debug {
+                        log::debug!(
+                            "Rule failed: expected euid in range {}-{} but none provided",
+                            min_euid,
+                            max_euid
+                        );
+                    }
                     return false;
                 }
             }
@@ -262,19 +297,23 @@ impl AllowRule {
             match context.platform_binary {
                 Some(actual_platform) => {
                     if actual_platform != expected_platform {
-                        log::debug!(
-                            "Rule failed: platform_binary mismatch. Expected {}, got {}",
-                            expected_platform,
-                            actual_platform
-                        );
+                        if debug {
+                            log::debug!(
+                                "Rule failed: platform_binary mismatch. Expected {}, got {}",
+                                expected_platform,
+                                actual_platform
+                            );
+                        }
                         return false;
                     }
                 }
                 None => {
-                    log::debug!(
-                        "Rule failed: expected platform_binary {} but none provided",
-                        expected_platform
-                    );
+                    if debug {
+                        log::debug!(
+                            "Rule failed: expected platform_binary {} but none provided",
+                            expected_platform
+                        );
+                    }
                     return false;
                 }
             }

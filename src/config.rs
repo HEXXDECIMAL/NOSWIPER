@@ -292,8 +292,19 @@ impl Config {
     }
 
     /// Check if a path is in the default basename paths
+    #[allow(dead_code)] // Used by allow_rule
     pub fn is_allowed_path(&self, path: &std::path::Path) -> bool {
+        self.is_allowed_path_with_debug(path, false)
+    }
+
+    /// Check if a path is in the default basename paths with optional debug logging
+    pub fn is_allowed_path_with_debug(&self, path: &std::path::Path, debug: bool) -> bool {
         let path_str = path.to_string_lossy();
+
+        if debug {
+            log::debug!("Checking if path '{}' is in default_base_paths", path_str);
+            log::debug!("Available default_base_paths: {:?}", self.default_base_paths);
+        }
 
         for allowed in &self.default_base_paths {
             let expanded = shellexpand::tilde(allowed);
@@ -301,17 +312,36 @@ impl Config {
             if expanded.contains('*') {
                 if let Ok(pattern) = glob::Pattern::new(&expanded) {
                     if pattern.matches(&path_str) {
+                        if debug {
+                            log::debug!("Path '{}' matches pattern '{}'", path_str, expanded);
+                        }
                         return true;
+                    } else {
+                        if debug {
+                            log::debug!("Path '{}' does NOT match pattern '{}'", path_str, expanded);
+                        }
                     }
+                } else {
+                    log::warn!("Invalid glob pattern in default_base_paths: '{}'", expanded);
                 }
             } else {
                 // Simple prefix matching for paths without wildcards
                 if path_str.starts_with(expanded.as_ref()) {
+                    if debug {
+                        log::debug!("Path '{}' starts with prefix '{}'", path_str, expanded);
+                    }
                     return true;
+                } else {
+                    if debug {
+                        log::debug!("Path '{}' does NOT start with prefix '{}'", path_str, expanded);
+                    }
                 }
             }
         }
 
+        if debug {
+            log::debug!("Path '{}' is NOT in default_base_paths", path_str);
+        }
         false
     }
 

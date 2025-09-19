@@ -17,6 +17,10 @@ pub struct Args {
     #[arg(long, short)]
     pub verbose: bool,
 
+    /// Debug mode (show detailed logs for protected file access only)
+    #[arg(long, short)]
+    pub debug: bool,
+
     /// Also stop parent process when stopping violating process
     #[arg(long, default_value = "true")]
     pub stop_parent: bool,

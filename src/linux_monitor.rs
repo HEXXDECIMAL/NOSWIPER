@@ -776,6 +776,10 @@ impl LinuxMonitor {
                 );
                 self.respond_to_event(metadata.fd, FAN_ALLOW)?;
             }
+            Decision::NotProtected => {
+                // Not a protected file, allow silently
+                self.respond_to_event(metadata.fd, FAN_ALLOW)?;
+            }
             Decision::Deny => {
                 // Get detailed process tree for violations (5 levels)
                 let detailed_tree = self.build_process_tree(metadata.pid, 5);

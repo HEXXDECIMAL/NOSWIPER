@@ -169,11 +169,11 @@ protected_files:
   # CLOUD CREDENTIALS - User accounts only
   # ============================================================================
 
-  # AWS Credentials
+  # AWS Credentials (actual secrets only, not config)
   - id: user_aws_credentials
     paths:
-      - "~/.aws/credentials"
-      - "~/.aws/config"
+      - "~/.aws/credentials"  # Contains access keys and secrets
+      # NOT including ~/.aws/config which only has region/profile settings
     allow:
       # User processes only
       - base: "aws"
@@ -186,27 +186,86 @@ protected_files:
         euid: 501-65533
       - base: "ansible*"
         euid: 501-65533
+      # AWS CLI v2 is implemented in Python
+      # macOS Command Line Tools Python (capital P)
+      - base: "Python"
+        path: "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/*/Resources/Python.app/Contents/MacOS/Python"
+        euid: 501-65533
+      # Standard python (lowercase) from anywhere
+      - base: "python*"
+        euid: 501-65533
 
-  # Google Cloud Credentials
-  - id: user_gcloud_credentials
+  # AWS Session tokens (temporary credentials)
+  - id: user_aws_session_tokens
     paths:
-      - "~/.config/gcloud/*"
-      - "~/.gcloud/*"
+      - "~/.aws/cli/cache/*.json"  # Session tokens from SSO/assume-role
     allow:
-      # User processes only
+      - base: "aws"
+        euid: 501-65533
+      - base: "aws-vault"
+        euid: 501-65533
+
+  # Google Cloud Application Default Credentials
+  # These can be used by ANY application using GCP client libraries
+  - id: user_gcp_application_default_credentials
+    paths:
+      - "~/.config/gcloud/application_default_credentials.json"
+      - "~/.config/gcloud/legacy_credentials/*/adc.json"
+    allow:
+      # Any user process can potentially use ADC
+      - euid: 501-65533
+        # Note: We can't restrict by binary name since any app using
+        # GCP client libraries will access these
+
+  # Google Cloud CLI-specific credentials
+  # These are only used by gcloud CLI and related tools
+  - id: user_gcloud_cli_credentials
+    paths:
+      - "~/.config/gcloud/access_tokens.db"
+      - "~/.config/gcloud/credentials.db"
+    allow:
       - base: "gcloud"
         euid: 501-65533
       - base: "gsutil"
         euid: 501-65533
       - base: "bq"
         euid: 501-65533
-      - base: "terraform"
+      - base: "docker-credential-gcloud"
+        euid: 501-65533
+      # gcloud is implemented in Python, so Python needs access
+      # macOS Command Line Tools Python (capital P)
+      - base: "Python"
+        path: "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/*/Resources/Python.app/Contents/MacOS/Python"
+        euid: 501-65533
+      # Standard python (lowercase) from anywhere
+      - base: "python*"
         euid: 501-65533
 
-  # Azure Credentials
+  # Google Cloud Service Account Keys
+  # These JSON files can be stored anywhere and used by any app
+  - id: gcp_service_account_keys
+    paths:
+      - "~/*-key.json"              # Common pattern for service account keys
+      - "~/Downloads/*-key.json"     # Often downloaded here
+      - "~/.config/*-key.json"       # Sometimes stored in config dirs
+      - "~/projects/**/service-account*.json"
+      - "~/projects/**/*-sa.json"
+    allow:
+      # Any user process might use service account keys
+      - euid: 501-65533
+        # Note: Hard to restrict by binary since any app can use these
+
+  # Azure Credentials (actual secrets only)
   - id: user_azure_credentials
     paths:
-      - "~/.azure/*"
+      # Access tokens and refresh tokens
+      - "~/.azure/accessTokens.json"
+      - "~/.azure/msal_token_cache.json"
+      # Service principal credentials
+      - "~/.azure/servicePrincipals.json"
+      # Azure DevOps tokens
+      - "~/.azure/azuredevops/personalAccessTokens.json"
+      # NOT including ~/.azure/config or profiles
     allow:
       # User processes only
       - base: "az"
@@ -215,8 +274,60 @@ protected_files:
         euid: 501-65533
       - base: "pwsh" # PowerShell Core
         euid: 501-65533
+      - base: "dotnet"
+        euid: 501-65533
+      # Azure CLI is implemented in Python
+      # macOS Command Line Tools Python (capital P)
+      - base: "Python"
+        path: "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/*/Resources/Python.app/Contents/MacOS/Python"
+        euid: 501-65533
+      # Standard python (lowercase) from anywhere
+      - base: "python*"
+        euid: 501-65533
 
-  # Kubernetes Configurations
+  # DigitalOcean Credentials
+  - id: user_digitalocean_credentials
+    paths:
+      - "~/.config/doctl/config.yaml"  # Contains access tokens
+    allow:
+      - base: "doctl"
+        euid: 501-65533
+      - base: "terraform"
+        euid: 501-65533
+
+  # Linode/Akamai Credentials
+  - id: user_linode_credentials
+    paths:
+      - "~/.config/linode-cli"  # Contains API tokens
+    allow:
+      - base: "linode-cli"
+        euid: 501-65533
+      - base: "terraform"
+        euid: 501-65533
+
+  # Oracle Cloud Infrastructure Credentials
+  - id: user_oci_credentials
+    paths:
+      - "~/.oci/config"  # Contains private keys and fingerprints
+      - "~/.oci/*_key.pem"  # Private keys for API access
+    allow:
+      - base: "oci"
+        euid: 501-65533
+      - base: "terraform"
+        euid: 501-65533
+
+  # IBM Cloud Credentials
+  - id: user_ibmcloud_credentials
+    paths:
+      - "~/.bluemix/config.json"  # Contains API keys
+      - "~/.ibm-cloud/config.json"
+    allow:
+      - base: "ibmcloud"
+        euid: 501-65533
+      - base: "terraform"
+        euid: 501-65533
+
+  # Kubernetes Configurations (contains cluster auth tokens/certs)
   - id: user_kubernetes_config
     paths:
       - "~/.kube/config"
@@ -249,6 +360,40 @@ protected_files:
       - base: "docker-compose"
         euid: 501-65533
       - base: "podman"
+        euid: 501-65533
+      - base: "buildah"
+        euid: 501-65533
+
+  # Vercel/Now Credentials
+  - id: user_vercel_credentials
+    paths:
+      - "~/.now/auth.json"
+      - "~/.vercel/auth.json"
+    allow:
+      - base: "vercel"
+        euid: 501-65533
+      - base: "now"
+        euid: 501-65533
+
+  # Netlify Credentials
+  - id: user_netlify_credentials
+    paths:
+      - "~/.netlify/config.json"  # Contains access tokens
+    allow:
+      - base: "netlify"
+        euid: 501-65533
+
+  # Cloudflare Credentials
+  - id: user_cloudflare_credentials
+    paths:
+      - "~/.cloudflare/config.yaml"
+      - "~/.wrangler/config/default.toml"  # Wrangler (Workers) credentials
+    allow:
+      - base: "cloudflared"
+        euid: 501-65533
+      - base: "wrangler"
+        euid: 501-65533
+      - base: "terraform"
         euid: 501-65533
 
   # ============================================================================
@@ -431,7 +576,7 @@ protected_files:
   # ============================================================================
   # NETWORK AUTHENTICATION
   # ============================================================================
-  # .netrc file (FTP/HTTP basic auth)
+  # .netrc file (FTP/HTTP basic auth, Heroku API tokens)
   - id: netrc_file
     paths:
       - "~/.netrc"
@@ -445,6 +590,8 @@ protected_files:
       - base: "lftp"
         euid: 501-65533
       - base: "git" # Git can use .netrc for HTTP auth
+        euid: 501-65533
+      - base: "heroku" # Heroku CLI stores API tokens here
         euid: 501-65533
 
   # .authinfo file (Emacs/Gnus authentication)

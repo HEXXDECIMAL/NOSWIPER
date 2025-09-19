@@ -90,6 +90,8 @@ pub struct Monitor {
     mode: Mode,
     mechanism: Mechanism,
     verbose: bool,
+    #[allow(dead_code)] // Used in future functionality
+    debug: bool,
     stop_parent: bool,
     #[cfg(target_os = "macos")]
     process_cache: HashMap<u32, ProcessInfo>,
@@ -108,15 +110,16 @@ struct EsloggerEvent {
 }
 
 impl Monitor {
-    pub fn new(mode: Mode, mechanism: Mechanism, verbose: bool, stop_parent: bool) -> Self {
+    pub fn new(mode: Mode, mechanism: Mechanism, verbose: bool, debug: bool, stop_parent: bool) -> Self {
         // Load config from embedded YAML
         let config = Config::default().expect("Failed to load default config");
 
         Self {
-            rule_engine: RuleEngine::new(config),
+            rule_engine: RuleEngine::with_debug(config, debug),
             mode,
             mechanism,
             verbose,
+            debug,
             stop_parent,
             #[cfg(target_os = "macos")]
             process_cache: HashMap::new(),
@@ -218,10 +221,16 @@ impl Monitor {
 
         log::info!("Listening for file access events...");
 
-        // Check if we're getting any output at all
+        // Track events in first few seconds
+        let event_count_shared = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let event_count_clone = event_count_shared.clone();
+
+        // Report event rate after initial period
         tokio::spawn(async move {
             tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-            log::warn!("If you don't see any events after 5 seconds, try opening files in another terminal");
+            let count = event_count_clone.load(std::sync::atomic::Ordering::Relaxed);
+            log::info!("Processed {} events in first 5 seconds (averaging {:.1} events/sec)",
+                      count, count as f64 / 5.0);
         });
 
         while let Some(line) = lines.next_line().await? {
@@ -230,6 +239,11 @@ impl Monitor {
             }
 
             event_count += 1;
+
+            // Update shared counter for first 5 seconds
+            if event_count <= 10000 { // Reasonable cap to avoid overflow
+                event_count_shared.store(event_count, std::sync::atomic::Ordering::Relaxed);
+            }
 
             // Log progress periodically
             if event_count % 1000 == 0 {
@@ -711,16 +725,25 @@ impl Monitor {
 
         match decision {
             Decision::Allow => {
-                let log_msg = self.build_compact_log_message(
-                    "OK",
-                    &real_protected_path,
-                    "exec",
-                    pid,
-                    ppid,
-                    euid,
-                    &real_process_path,
-                );
-                log::info!("{}", log_msg);
+                // This is a protected file that was allowed access
+                if self.verbose {
+                    let log_msg = self.build_compact_log_message(
+                        "OK",
+                        &real_protected_path,
+                        "exec",
+                        pid,
+                        ppid,
+                        euid,
+                        &real_process_path,
+                    );
+                    log::info!("{}", log_msg);
+                }
+            }
+            Decision::NotProtected => {
+                // Not a protected file, don't log unless debugging
+                if self.debug {
+                    log::trace!("File '{}' is not protected", real_protected_path.display());
+                }
             }
             Decision::Deny => {
                 match self.mode {
@@ -986,16 +1009,25 @@ impl Monitor {
 
         match decision {
             Decision::Allow => {
-                let log_msg = self.build_compact_log_message(
-                    "OK",
-                    &real_file_path,
-                    "open",
-                    pid,
-                    ppid,
-                    euid,
-                    &real_process_path,
-                );
-                log::info!("{}", log_msg);
+                // This is a protected file that was allowed access
+                if self.verbose {
+                    let log_msg = self.build_compact_log_message(
+                        "OK",
+                        &real_file_path,
+                        "open",
+                        pid,
+                        ppid,
+                        euid,
+                        &real_process_path,
+                    );
+                    log::info!("{}", log_msg);
+                }
+            }
+            Decision::NotProtected => {
+                // Not a protected file, don't log unless debugging
+                if self.debug {
+                    log::trace!("File '{}' is not protected", real_file_path.display());
+                }
             }
             Decision::Deny => {
                 match self.mode {

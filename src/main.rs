@@ -66,6 +66,7 @@ async fn main() -> Result<()> {
         args.get_mode(),
         args.get_mechanism(),
         args.verbose,
+        args.debug,
         args.stop_parent,
     );
 

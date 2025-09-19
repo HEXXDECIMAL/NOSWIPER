@@ -280,6 +280,9 @@ impl DTraceMonitor {
                     file_path
                 );
             }
+            Decision::NotProtected => {
+                // Not a protected file, don't log
+            }
             Decision::Deny => {
                 match self.mode {
                     Mode::Monitor => {

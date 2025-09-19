@@ -47,34 +47,9 @@ protected_files:
       - "~/Library/Keychains/*/keychain-2.db"
     allow:
       # Security framework - must be user process
-      - base: "security"
-        euid: 501-599
-      - base: "securityd"
-        euid: 501-599
-      # Apps that legitimately use user keychain - with team_id validation
-      - team_id: "EQHXZ8M8AV" # Google (Chrome)
-        euid: 501-599
-      - team_id: "43AQ936H96" # Mozilla (Firefox)
-        euid: 501-599
-      - team_id: "KL8N8XSYF4" # Brave
-        euid: 501-599
-      - team_id: "UBF8T346G9" # Microsoft
-        euid: 501-599
-      - team_id: "2JUAS4JW7F" # TablePlus
-        euid: 501-599
-      - team_id: "W6LX9TZ93Q" # DBngin
-        euid: 501-599
-      # Password managers accessing keychain
-      - team_id: "2BUA8C4S2C" # 1Password
-        euid: 501-599
-      - team_id: "LTZ2PFU5D6" # Bitwarden
-        euid: 501-599
-      # Apple apps accessing user keychain
       - platform_binary: true
-        app_id: "com.apple.Safari*"
         euid: 501-599
-      - platform_binary: true
-        app_id: "com.apple.mail*"
+      - path: "/Applications/*/Contents/MacOS/*"
         euid: 501-599
 
   # ============================================================================
@@ -350,16 +325,16 @@ protected_files:
 
 # Default base paths for macOS
 default_base_paths:
-  - /usr/bin
-  - /bin
-  - /usr/sbin
-  - /sbin
-  - /System/Library
-  - /usr/local/bin
-  - /usr/local/sbin
-  - /opt/homebrew/bin
-  - /opt/homebrew/sbin
-  - /opt/homebrew/Cellar/*/*/bin
+  - "/usr/bin/*"
+  - "/bin/*"
+  - "/usr/sbin/*"
+  - "/sbin/*"
+  - "/System/Library/*"
+  - "/usr/local/bin/*"
+  - "/usr/local/sbin/*"
+  - "/opt/homebrew/bin/*"
+  - "/opt/homebrew/sbin/*"
+  - "/opt/homebrew/Cellar/*/*/bin/*"
   - "/Applications/*/Contents/MacOS"
   - "/Applications/*/Contents/Helpers"
   - "/System/Applications/*/Contents/MacOS"

@@ -7,8 +7,9 @@ use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Decision {
-    Allow,
-    Deny,
+    Allow,        // Protected file, access allowed
+    Deny,         // Protected file, access denied
+    NotProtected, // Not a protected file
 }
 
 // Cache entry for home directories
@@ -33,13 +34,25 @@ pub struct RuleEngine {
     pub config: Config,
     // Runtime exceptions (process_path, file_path) -> expires_at
     runtime_exceptions: HashMap<(PathBuf, PathBuf), Option<Instant>>,
+    // Debug mode flag
+    debug: bool,
 }
 
 impl RuleEngine {
+    #[allow(dead_code)] // May be used in tests
     pub fn new(config: Config) -> Self {
         Self {
             config,
             runtime_exceptions: HashMap::new(),
+            debug: false,
+        }
+    }
+
+    pub fn with_debug(config: Config, debug: bool) -> Self {
+        Self {
+            config,
+            runtime_exceptions: HashMap::new(),
+            debug,
         }
     }
 
@@ -191,22 +204,32 @@ impl RuleEngine {
         // Normalize the file path to use ~ if it's in a home directory
         let normalized_path = Self::normalize_path_to_tilde(file_path);
 
+        // Only log access checks in debug mode
+        if self.debug {
+            log::debug!("Checking access: process '{}' accessing '{}'",
+                       context.path.display(), normalized_path.display());
+        }
+
         // First check runtime exceptions (use normalized path for consistency)
         let exception_key = (context.path.clone(), normalized_path.clone());
         if let Some(expires_at) = self.runtime_exceptions.get(&exception_key) {
             if expires_at.is_none_or(|exp| Instant::now() < exp) {
-                log::debug!("Access allowed by runtime exception");
+                if self.debug {
+                    log::debug!("Access allowed by runtime exception");
+                }
                 return Decision::Allow;
             }
         }
 
         // Check global exclusions (processes that can access any protected file)
         for exclusion in &self.config.global_exclusions {
-            if exclusion.matches_with_config(context, Some(&self.config)) {
-                log::info!(
-                    "Access allowed by global exclusion: {}",
-                    context.path.display()
-                );
+            if exclusion.matches_with_config_and_debug(context, Some(&self.config), self.debug) {
+                if self.debug {
+                    log::info!(
+                        "Access allowed by global exclusion: {}",
+                        context.path.display()
+                    );
+                }
                 return Decision::Allow;
             }
         }
@@ -218,23 +241,45 @@ impl RuleEngine {
                 // No need to expand them since we normalized the file path
                 if let Ok(pattern) = glob::Pattern::new(&pattern_str) {
                     if pattern.matches_path(&normalized_path) {
-                        // Check allow rules
-                        for rule in &protected_file.allow_rules {
-                            if rule.matches_with_config(context, Some(&self.config)) {
-                                log::debug!("Process allowed by allow rule");
+                        if self.debug {
+                            log::debug!("File '{}' matches protected pattern '{}' (rule id: {})",
+                                       normalized_path.display(), pattern_str,
+                                       protected_file.id.as_deref().unwrap_or("unnamed"));
+
+                            // Check allow rules
+                            log::debug!("Checking {} allow rules for process '{}'",
+                                       protected_file.allow_rules.len(), context.path.display());
+                        }
+
+                        for (i, rule) in protected_file.allow_rules.iter().enumerate() {
+                            if self.debug {
+                                log::debug!("Checking allow rule #{} for rule id '{}'", i + 1,
+                                          protected_file.id.as_deref().unwrap_or("unnamed"));
+                            }
+                            if rule.matches_with_config_and_debug(context, Some(&self.config), self.debug) {
+                                if self.debug {
+                                    log::info!("Process '{}' allowed by rule #{} in '{}'",
+                                              context.path.display(), i + 1,
+                                              protected_file.id.as_deref().unwrap_or("unnamed"));
+                                }
                                 return Decision::Allow;
                             }
                         }
                         // No rules matched - deny access
-                        log::warn!("No allow rules matched for {}", context.path.display());
+                        log::warn!("DENIED: No allow rules matched for process '{}' accessing '{}' (protected by rule '{}')",
+                                  context.path.display(), normalized_path.display(),
+                                  protected_file.id.as_deref().unwrap_or("unnamed"));
                         return Decision::Deny;
                     }
                 }
             }
         }
 
-        // If no pattern matched, allow by default
-        Decision::Allow
+        // If no pattern matched, it's not a protected file
+        if self.debug {
+            log::debug!("File '{}' is not protected, allowing access", normalized_path.display());
+        }
+        Decision::NotProtected
     }
 
     /// Add a runtime exception (temporary allow)
@@ -326,9 +371,9 @@ mod tests {
             let decision = engine.check_access(&malware, &ssh_key, None);
             assert_eq!(decision, Decision::Deny);
         } else {
-            // If not protected, it would be allowed
+            // If not protected, it would return NotProtected
             let decision = engine.check_access(&malware, &ssh_key, None);
-            assert_eq!(decision, Decision::Allow);
+            assert_eq!(decision, Decision::NotProtected);
         }
     }
 
