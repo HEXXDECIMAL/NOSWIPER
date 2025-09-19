@@ -55,27 +55,37 @@ protected_files:
   # ============================================================================
   # SYSTEM KEYCHAIN FILES - System-wide keychains
   # ============================================================================
-  - id: system_keychain_files
+  - id: library_keychain_files
     paths:
       - "/Library/Keychains/*.keychain"
       - "/Library/Keychains/*.keychain-db"
+    allow:
+      - path: /usr/libexec/*
+        platform_binary: true
+      - path: /System/*
+        platform_binary: true
+      - path: /Applications/*.app/Contents/MacOS/*
+        euid: 501-1000
+        ppid: 1
+      - path: /Applications/*/*.app/Contents/MacOS/*
+        euid: 501-1000
+        ppid: 1
+      # security command (keychain utility)
+      - path: /usr/bin/security
+        euid: 501-599
+
+  - id: system_keychain_files
+    paths:
       - "/System/Library/Keychains/*.keychain"
       - "/System/Library/Keychains/*.keychain-db"
     allow:
-      # System processes only
-      - platform_binary: true
-        euid: 0 # Root only
-      # Security daemon running as root
-      - base: "securityd"
-        euid: 0
-      - base: "trustd"
-        euid: 0
-      # System services that need certificates
-      - base: "codesign"
-        euid: 0
-      - platform_binary: true
-        app_id: "com.apple.SecurityAgent"
-        euid: 0
+      - path: /usr/libexec/*
+        platform_binary: true
+      - path: /System/*
+        platform_binary: true
+      # Google Chrome variants accessing system root certificates
+      - team_id: "EQHXZ8M8AV" # Google
+        euid: 501-599
 
   # ============================================================================
   # BROWSER PASSWORD STORES - User data only
@@ -87,7 +97,7 @@ protected_files:
       - "~/Library/Application Support/Firefox/Profiles/*/logins.json"
       - "~/Library/Application Support/Firefox/Profiles/*/key*.db"
     allow:
-      - team_id: "43AQ936H96" # Mozilla
+      - team_id: "43AQ936H96" # Mozilla (includes all Firefox variants)
         euid: 501-599
       - app_id: "org.mozilla.firefox"
         euid: 501-599
@@ -102,7 +112,7 @@ protected_files:
       - "~/Library/Application Support/Google/Chrome Beta/*/Login Data"
       - "~/Library/Application Support/Google/Chrome Canary/*/Login Data"
     allow:
-      - team_id: "EQHXZ8M8AV" # Google
+      - team_id: "EQHXZ8M8AV" # Google (includes all Chrome variants)
         euid: 501-599
       - app_id: "com.google.Chrome*"
         euid: 501-599

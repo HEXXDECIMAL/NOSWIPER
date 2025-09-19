@@ -123,6 +123,12 @@ protected_files:
         arg: "-l"
       - base: "bash"
         arg: "-i"
+      - base: "mcfly"
+        euid: 501-65533
+      - base: "atuin"
+        euid: 501-65533
+      - base: "fzf"
+        euid: 501-65533
 
   # Zsh history
   - id: zsh_history
@@ -135,6 +141,12 @@ protected_files:
         arg: "-l"
       - base: "zsh"
         arg: "-i"
+      - base: "mcfly"
+        euid: 501-65533
+      - base: "atuin"
+        euid: 501-65533
+      - base: "fzf"
+        euid: 501-65533
 
   # Fish history
   - id: fish_history
@@ -144,6 +156,12 @@ protected_files:
     allow:
       # Fish can always access fish history
       - base: "fish"
+      - base: "mcfly"
+        euid: 501-65533
+      - base: "atuin"
+        euid: 501-65533
+      - base: "fzf"
+        euid: 501-65533
 
   # Generic/POSIX sh history
   - id: sh_history
@@ -172,7 +190,7 @@ protected_files:
   # AWS Credentials (actual secrets only, not config)
   - id: user_aws_credentials
     paths:
-      - "~/.aws/credentials"  # Contains access keys and secrets
+      - "~/.aws/credentials" # Contains access keys and secrets
       # NOT including ~/.aws/config which only has region/profile settings
     allow:
       # User processes only
@@ -191,14 +209,39 @@ protected_files:
       - base: "Python"
         path: "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/*/Resources/Python.app/Contents/MacOS/Python"
         euid: 501-65533
-      # Standard python (lowercase) from anywhere
+      # Standard python (lowercase) from anywhere (for boto3/boto)
       - base: "python*"
+        euid: 501-65533
+      # AWS SAM CLI
+      - base: "sam"
+        euid: 501-65533
+      # AWS CDK
+      - base: "cdk"
+        euid: 501-65533
+      # Serverless Framework
+      - base: "serverless"
+        euid: 501-65533
+      - base: "sls"  # serverless shorthand
+        euid: 501-65533
+      # Node.js (for AWS SDK)
+      - base: "node"
+        euid: 501-65533
+      # Go binaries that use AWS SDK
+      - base: "eksctl"
+        euid: 501-65533
+      # Docker (for ECR authentication)
+      - base: "docker"
+        euid: 501-65533
+      - base: "docker-credential-*"
+        euid: 501-65533
+      # Pulumi
+      - base: "pulumi"
         euid: 501-65533
 
   # AWS Session tokens (temporary credentials)
   - id: user_aws_session_tokens
     paths:
-      - "~/.aws/cli/cache/*.json"  # Session tokens from SSO/assume-role
+      - "~/.aws/cli/cache/*.json" # Session tokens from SSO/assume-role
     allow:
       - base: "aws"
         euid: 501-65533
@@ -245,9 +288,9 @@ protected_files:
   # These JSON files can be stored anywhere and used by any app
   - id: gcp_service_account_keys
     paths:
-      - "~/*-key.json"              # Common pattern for service account keys
-      - "~/Downloads/*-key.json"     # Often downloaded here
-      - "~/.config/*-key.json"       # Sometimes stored in config dirs
+      - "~/*-key.json" # Common pattern for service account keys
+      - "~/Downloads/*-key.json" # Often downloaded here
+      - "~/.config/*-key.json" # Sometimes stored in config dirs
       - "~/projects/**/service-account*.json"
       - "~/projects/**/*-sa.json"
     allow:
@@ -288,7 +331,7 @@ protected_files:
   # DigitalOcean Credentials
   - id: user_digitalocean_credentials
     paths:
-      - "~/.config/doctl/config.yaml"  # Contains access tokens
+      - "~/.config/doctl/config.yaml" # Contains access tokens
     allow:
       - base: "doctl"
         euid: 501-65533
@@ -298,7 +341,7 @@ protected_files:
   # Linode/Akamai Credentials
   - id: user_linode_credentials
     paths:
-      - "~/.config/linode-cli"  # Contains API tokens
+      - "~/.config/linode-cli" # Contains API tokens
     allow:
       - base: "linode-cli"
         euid: 501-65533
@@ -308,8 +351,8 @@ protected_files:
   # Oracle Cloud Infrastructure Credentials
   - id: user_oci_credentials
     paths:
-      - "~/.oci/config"  # Contains private keys and fingerprints
-      - "~/.oci/*_key.pem"  # Private keys for API access
+      - "~/.oci/config" # Contains private keys and fingerprints
+      - "~/.oci/*_key.pem" # Private keys for API access
     allow:
       - base: "oci"
         euid: 501-65533
@@ -319,7 +362,7 @@ protected_files:
   # IBM Cloud Credentials
   - id: user_ibmcloud_credentials
     paths:
-      - "~/.bluemix/config.json"  # Contains API keys
+      - "~/.bluemix/config.json" # Contains API keys
       - "~/.ibm-cloud/config.json"
     allow:
       - base: "ibmcloud"
@@ -378,7 +421,7 @@ protected_files:
   # Netlify Credentials
   - id: user_netlify_credentials
     paths:
-      - "~/.netlify/config.json"  # Contains access tokens
+      - "~/.netlify/config.json" # Contains access tokens
     allow:
       - base: "netlify"
         euid: 501-65533
@@ -387,7 +430,7 @@ protected_files:
   - id: user_cloudflare_credentials
     paths:
       - "~/.cloudflare/config.yaml"
-      - "~/.wrangler/config/default.toml"  # Wrangler (Workers) credentials
+      - "~/.wrangler/config/default.toml" # Wrangler (Workers) credentials
     allow:
       - base: "cloudflared"
         euid: 501-65533
