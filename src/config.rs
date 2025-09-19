@@ -52,30 +52,51 @@ impl From<std::io::Error> for ConfigError {
     }
 }
 
+// Embed the common UNIX configuration (shared across all UNIX-like systems)
+#[cfg(any(
+    target_os = "macos",
+    target_os = "linux",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd",
+    target_os = "solaris",
+    target_os = "illumos",
+    target_os = "dragonfly"
+))]
+const UNIX_CONFIG_YAML: &str = include_str!("../config/unix.yaml");
+
 // Embed the OS-specific configurations at compile time
 #[cfg(target_os = "macos")]
-const DEFAULT_CONFIG_YAML: &str = include_str!("../config/macos.yaml");
+const OS_CONFIG_YAML: &str = include_str!("../config/macos.yaml");
 
 #[cfg(target_os = "linux")]
-const DEFAULT_CONFIG_YAML: &str = include_str!("../config/linux.yaml");
+const OS_CONFIG_YAML: &str = include_str!("../config/linux.yaml");
 
 #[cfg(target_os = "freebsd")]
-const DEFAULT_CONFIG_YAML: &str = include_str!("../config/freebsd.yaml");
+const OS_CONFIG_YAML: &str = include_str!("../config/freebsd.yaml");
 
 #[cfg(target_os = "netbsd")]
-const DEFAULT_CONFIG_YAML: &str = include_str!("../config/netbsd.yaml");
+const OS_CONFIG_YAML: &str = include_str!("../config/netbsd.yaml");
 
 #[cfg(target_os = "openbsd")]
-const DEFAULT_CONFIG_YAML: &str = include_str!("../config/openbsd.yaml");
+const OS_CONFIG_YAML: &str = include_str!("../config/openbsd.yaml");
+
+#[cfg(target_os = "solaris")]
+const OS_CONFIG_YAML: &str = include_str!("../config/solaris.yaml");
+
+#[cfg(target_os = "illumos")]
+const OS_CONFIG_YAML: &str = include_str!("../config/illumos.yaml");
 
 #[cfg(not(any(
     target_os = "macos",
     target_os = "linux",
     target_os = "freebsd",
     target_os = "netbsd",
-    target_os = "openbsd"
+    target_os = "openbsd",
+    target_os = "solaris",
+    target_os = "illumos"
 )))]
-const DEFAULT_CONFIG_YAML: &str = include_str!("../config/default.yaml");
+const OS_CONFIG_YAML: &str = include_str!("../config/default.yaml");
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Config {
@@ -85,6 +106,7 @@ pub struct Config {
     pub global_exclusions: Vec<AllowRule>,
     #[serde(alias = "allowed_paths")] // For backward compatibility
     pub default_base_paths: Vec<String>,
+    #[serde(default = "MonitoringConfig::default")]
     pub monitoring: MonitoringConfig,
 }
 
@@ -92,25 +114,15 @@ pub struct Config {
 pub struct ProtectedFile {
     #[serde(default)]
     pub id: Option<String>,
-    #[serde(flatten)]
-    pub patterns_config: PatternsConfig,
+    pub paths: Vec<String>,
     #[serde(rename = "allow")]
     pub allow_rules: Vec<AllowRule>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(untagged)]
-pub enum PatternsConfig {
-    Single { pattern: String },
-    Multiple { patterns: Vec<String> },
-}
-
 impl ProtectedFile {
     pub fn patterns(&self) -> Vec<String> {
-        match &self.patterns_config {
-            PatternsConfig::Single { pattern } => vec![pattern.clone()],
-            PatternsConfig::Multiple { patterns } => patterns.clone(),
-        }
+        // Keep the method name for backward compatibility in the codebase
+        self.paths.clone()
     }
 }
 
@@ -118,6 +130,15 @@ impl ProtectedFile {
 pub struct MonitoringConfig {
     pub buffer_size: usize,
     pub max_events_per_sec: usize,
+}
+
+impl Default for MonitoringConfig {
+    fn default() -> Self {
+        Self {
+            buffer_size: 1000,
+            max_events_per_sec: 100,
+        }
+    }
 }
 
 impl Config {
@@ -132,7 +153,32 @@ impl Config {
     /// Returns a [`ConfigError`] if the embedded configuration is malformed
     /// or fails validation.
     pub fn default() -> Result<Self, ConfigError> {
-        let config: Config = serde_yaml::from_str(DEFAULT_CONFIG_YAML)?;
+        // Load OS-specific config first
+        let os_name = std::env::consts::OS;
+        let mut config: Config = serde_yaml::from_str(OS_CONFIG_YAML)
+            .map_err(|e| ConfigError::Validation(
+                format!("Error parsing {} config: {}", os_name, e)
+            ))?;
+
+        // On UNIX-like systems, merge with common UNIX configuration
+        #[cfg(any(
+            target_os = "macos",
+            target_os = "linux",
+            target_os = "freebsd",
+            target_os = "netbsd",
+            target_os = "openbsd",
+            target_os = "solaris",
+            target_os = "illumos",
+            target_os = "dragonfly"
+        ))]
+        {
+            let unix_config: Config = serde_yaml::from_str(UNIX_CONFIG_YAML)
+                .map_err(|e| ConfigError::Validation(
+                    format!("Error parsing unix.yaml config: {}", e)
+                ))?;
+            config.merge(unix_config);
+        }
+
         config.validate_global_exclusions()?;
         Ok(config)
     }
@@ -165,15 +211,15 @@ impl Config {
         Ok(user_config)
     }
 
-    /// Validates that all global exclusions have either path_pattern or team_id.
+    /// Validates that all global exclusions have either path or team_id.
     ///
     /// This is a security requirement to prevent overly broad global exclusions
     /// that could allow unauthorized access to protected files.
     fn validate_global_exclusions(&self) -> Result<(), ConfigError> {
         for (i, rule) in self.global_exclusions.iter().enumerate() {
-            if rule.path_pattern.is_none() && rule.team_id.is_none() {
+            if rule.path.is_none() && rule.team_id.is_none() {
                 let msg = format!(
-                    "Global exclusion rule {} is missing both path_pattern and team_id. \
+                    "Global exclusion rule {} is missing both path and team_id. \
                      Every global exclusion must have at least one of these for security.",
                     i + 1
                 );
@@ -181,6 +227,39 @@ impl Config {
             }
         }
         Ok(())
+    }
+
+    /// Merges another config into this one.
+    ///
+    /// Rules are combined, with no duplicates based on ID.
+    /// OS-specific rules take precedence over common UNIX rules.
+    pub fn merge(&mut self, other: Config) {
+        use std::collections::HashSet;
+
+        // Merge protected files (OS-specific takes precedence)
+        let mut seen_ids = HashSet::new();
+        for pf in &self.protected_files {
+            seen_ids.insert(pf.id.clone());
+        }
+
+        for pf in other.protected_files {
+            if !seen_ids.contains(&pf.id) {
+                self.protected_files.push(pf);
+            }
+        }
+
+        // Merge global exclusions
+        self.global_exclusions.extend(other.global_exclusions);
+
+        // Merge excluded patterns
+        let mut pattern_set: HashSet<_> = self.excluded_patterns.iter().cloned().collect();
+        for pattern in other.excluded_patterns {
+            if pattern_set.insert(pattern.clone()) {
+                self.excluded_patterns.push(pattern);
+            }
+        }
+
+        // Don't merge default_base_paths - keep OS-specific ones
     }
 
     /// Checks if a file path matches a glob pattern.

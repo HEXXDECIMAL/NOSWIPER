@@ -3,6 +3,7 @@
 
 /// Default protected credential patterns and their allowed programs
 /// DEPRECATED: Use config/default.yaml instead
+#[allow(dead_code)]
 pub const DEFAULT_PROTECTED: &[(&str, &[&str])] = &[
     // SSH Keys
     (
@@ -209,6 +210,7 @@ pub const DEFAULT_PROTECTED: &[(&str, &[&str])] = &[
 ];
 
 /// Patterns that should never be protected (public keys, configs, etc.)
+#[allow(dead_code)]
 pub const EXCLUDED_PATTERNS: &[&str] = &[
     "~/.ssh/*.pub",
     "~/.ssh/known_hosts",
@@ -219,6 +221,7 @@ pub const EXCLUDED_PATTERNS: &[&str] = &[
 
 /// Common paths for legitimate programs on macOS
 #[cfg(target_os = "macos")]
+#[allow(dead_code)]
 pub const MACOS_COMMON_PATHS: &[&str] = &[
     // System binaries
     "/usr/bin/*",

@@ -18,7 +18,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 ///
 /// - `team_id` is the most secure field as it cannot be spoofed on macOS
 /// - `app_id` can be set by developers and is less reliable
-/// - `path_pattern` should be as specific as possible to avoid false positives
+/// - `path` should be as specific as possible to avoid false positives
 /// - When possible, combine multiple criteria for stronger validation
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AllowRule {
@@ -27,8 +27,8 @@ pub struct AllowRule {
     pub base: Option<String>,
 
     /// Full path pattern (e.g., "/Applications/*/*.app/Contents/MacOS/*")
-    #[serde(default, alias = "path")]
-    pub path_pattern: Option<String>,
+    #[serde(default, alias = "path_pattern")]
+    pub path: Option<String>,
 
     /// Parent process ID (e.g., 1 for launchd)
     #[serde(default)]
@@ -42,9 +42,13 @@ pub struct AllowRule {
     #[serde(default)]
     pub app_id: Option<String>,
 
-    /// Command line arguments pattern
+    /// Command line arguments pattern (matches across all args joined)
     #[serde(default)]
     pub args_pattern: Option<String>,
+
+    /// Specific argument that must be present (e.g., "-l" for login shell)
+    #[serde(default)]
+    pub arg: Option<String>,
 
     /// User ID (for system processes)
     #[serde(default)]
@@ -53,6 +57,10 @@ pub struct AllowRule {
     /// Effective User ID - can be a single value (e.g., 0) or range (e.g., 501-599)
     #[serde(default, deserialize_with = "deserialize_euid")]
     pub euid: Option<(u32, u32)>,
+
+    /// Whether this is an Apple platform binary
+    #[serde(default)]
+    pub platform_binary: Option<bool>,
 }
 
 impl AllowRule {
@@ -87,7 +95,7 @@ impl AllowRule {
         }
 
         // Check path pattern
-        if let Some(ref pattern) = self.path_pattern {
+        if let Some(ref pattern) = self.path {
             let path_str = context.path.to_string_lossy();
             if !matches_pattern(pattern, &path_str) {
                 log::debug!(
@@ -97,8 +105,8 @@ impl AllowRule {
                 );
                 return false;
             }
-        } else if self.base.is_some() && self.path_pattern.is_none() {
-            // If base is specified but no path_pattern, check against default paths
+        } else if self.base.is_some() && self.path.is_none() {
+            // If base is specified but no path, check against default paths
             if let Some(cfg) = config {
                 if !cfg.is_allowed_path(&context.path) {
                     log::debug!("Rule failed: basename specified but process path '{}' not in default base paths", context.path.display());
@@ -165,7 +173,7 @@ impl AllowRule {
             }
         }
 
-        // Check args pattern
+        // Check args pattern (matches across all args joined)
         if let Some(ref pattern) = self.args_pattern {
             match &context.args {
                 Some(actual_args) => {
@@ -183,6 +191,29 @@ impl AllowRule {
                     log::debug!(
                         "Rule failed: expected args pattern '{}' but no args provided",
                         pattern
+                    );
+                    return false;
+                }
+            }
+        }
+
+        // Check for specific arg (must be present in args array)
+        if let Some(ref expected_arg) = self.arg {
+            match &context.args {
+                Some(actual_args) => {
+                    if !actual_args.contains(expected_arg) {
+                        log::debug!(
+                            "Rule failed: required arg '{}' not found in {:?}",
+                            expected_arg,
+                            actual_args
+                        );
+                        return false;
+                    }
+                }
+                None => {
+                    log::debug!(
+                        "Rule failed: expected arg '{}' but no args provided",
+                        expected_arg
                     );
                     return false;
                 }
@@ -220,6 +251,29 @@ impl AllowRule {
                         "Rule failed: expected euid in range {}-{} but none provided",
                         min_euid,
                         max_euid
+                    );
+                    return false;
+                }
+            }
+        }
+
+        // Check platform_binary
+        if let Some(expected_platform) = self.platform_binary {
+            match context.platform_binary {
+                Some(actual_platform) => {
+                    if actual_platform != expected_platform {
+                        log::debug!(
+                            "Rule failed: platform_binary mismatch. Expected {}, got {}",
+                            expected_platform,
+                            actual_platform
+                        );
+                        return false;
+                    }
+                }
+                None => {
+                    log::debug!(
+                        "Rule failed: expected platform_binary {} but none provided",
+                        expected_platform
                     );
                     return false;
                 }
@@ -413,13 +467,15 @@ mod tests {
     fn test_rule_matching() {
         let rule = AllowRule {
             base: Some("firefox".to_string()),
-            path_pattern: Some("/Applications/*/*.app/Contents/MacOS/*".to_string()),
+            path: Some("/Applications/*/*.app/Contents/MacOS/*".to_string()),
             ppid: Some(1),
             team_id: None,
             app_id: None,
             args_pattern: None,
+            arg: None,
             uid: None,
             euid: None,
+            platform_binary: None,
         };
 
         let context1 = ProcessContext::new(

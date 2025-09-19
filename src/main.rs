@@ -177,38 +177,72 @@ fn check_root_privileges() -> Result<()> {
 }
 
 fn show_config() {
-    use crate::defaults::{DEFAULT_PROTECTED, EXCLUDED_PATTERNS};
+    use crate::config::Config;
 
     println!("NoSwiper Configuration");
     println!("======================");
     println!();
 
-    println!("Protected Patterns:");
-    for (pattern, allowed_programs) in DEFAULT_PROTECTED {
-        println!("  {} -> {:?}", pattern, allowed_programs);
-    }
+    // Load the actual configuration
+    match Config::default() {
+        Ok(config) => {
+            println!("Protected Files ({} rules):", config.protected_files.len());
+            println!();
+            for pf in &config.protected_files {
+                println!("  ID: {}", pf.id.as_deref().unwrap_or("unnamed"));
+                println!("  Patterns:");
+                for pattern in pf.patterns() {
+                    println!("    - {}", pattern);
+                }
+                if !pf.allow_rules.is_empty() {
+                    println!("  Allow rules: {} rule(s)", pf.allow_rules.len());
+                    for (i, rule) in pf.allow_rules.iter().enumerate() {
+                        print!("    {}. ", i + 1);
+                        if let Some(base) = &rule.base {
+                            print!("base={}", base);
+                        }
+                        if let Some(arg) = &rule.arg {
+                            print!(" arg={}", arg);
+                        }
+                        if let Some(team_id) = &rule.team_id {
+                            print!(" team_id={}", team_id);
+                        }
+                        if let Some(path) = &rule.path {
+                            print!(" path={}", path);
+                        }
+                        println!();
+                    }
+                }
+                println!();
+            }
 
-    println!();
-    println!("Excluded Patterns:");
-    for pattern in EXCLUDED_PATTERNS {
-        println!("  {}", pattern);
-    }
+            println!("Global Exclusions: {} rule(s)", config.global_exclusions.len());
+            for (i, rule) in config.global_exclusions.iter().enumerate() {
+                print!("  {}. ", i + 1);
+                if let Some(team_id) = &rule.team_id {
+                    print!("team_id={}", team_id);
+                }
+                if let Some(path) = &rule.path {
+                    print!(" path={}", path);
+                }
+                println!();
+            }
+            println!();
 
-    println!();
-    println!("Platform-specific paths:");
-    #[cfg(target_os = "macos")]
-    {
-        println!("  macOS common paths:");
-        for path in crate::defaults::MACOS_COMMON_PATHS {
-            println!("    {}", path);
+            println!("Excluded Patterns:");
+            for pattern in &config.excluded_patterns {
+                println!("  - {}", pattern);
+            }
+            println!();
+
+            println!("Default Base Paths:");
+            for path in &config.default_base_paths {
+                println!("  - {}", path);
+            }
         }
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        println!("  Linux common paths:");
-        for path in crate::defaults::LINUX_COMMON_PATHS {
-            println!("    {}", path);
+        Err(e) => {
+            eprintln!("Error loading configuration: {}", e);
+            std::process::exit(1);
         }
     }
 }

@@ -35,6 +35,9 @@ pub struct ProcessContext {
 
     /// Effective User ID
     pub euid: Option<u32>,
+
+    /// Whether this is an Apple platform binary
+    pub platform_binary: Option<bool>,
 }
 
 impl ProcessContext {
@@ -64,6 +67,7 @@ impl ProcessContext {
             args: None,
             uid: None,
             euid: None,
+            platform_binary: None,
         }
     }
 
@@ -119,6 +123,13 @@ impl ProcessContext {
     #[allow(dead_code)] // Public API, used in tests and by monitors
     pub fn with_euid(mut self, euid: u32) -> Self {
         self.euid = Some(euid);
+        self
+    }
+
+    /// Sets whether this is a platform binary.
+    #[allow(dead_code)] // Public API, used in tests and by monitors
+    pub fn with_platform_binary(mut self, platform_binary: bool) -> Self {
+        self.platform_binary = Some(platform_binary);
         self
     }
 }

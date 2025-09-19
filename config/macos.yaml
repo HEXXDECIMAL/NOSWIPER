@@ -1,769 +1,352 @@
-# NoSwiper macOS Configuration
-# This file is embedded at compile time and provides the default rules for macOS
-# Users can override these with ~/.config/noswiper/config.yaml
+# macOS-specific configuration for NoSwiper
+# Common UNIX rules are in unix.yaml and loaded automatically
 
-# Global exclusions - processes that can access ANY protected file
-# IMPORTANT: Every global exclusion MUST have either:
-#   - A hardcoded path_pattern OR team_id (for security validation)
-#   - Additional restrictions like base and ppid are recommended
-# Without path_pattern or team_id, a rule could match any process!
+# macOS-specific global exclusions
 global_exclusions:
-  # Apple system processes from /System/* (like mdworker_shared, Safari services, etc.)
+  # Apple system processes from /System/*
   # These system services typically run as root (EUID 0) or system users
-  - app_id: "com.apple.*"
-    path_pattern: "/System/*"
+  - path: "/System/*"
     ppid: 1
-    euid: 0-500  # System and daemon users
+    platform_binary: true
+    euid: 0-500 # System and daemon users
+
+  # System libraries and helpers
+  - path: "/usr/libexec/*"
+    platform_binary: true
+    euid: 0-500
 
   # Popular backup programs (GUI apps must have ppid=1)
   - base: "syncthing"
-    path_pattern: "/usr/local/bin/syncthing"  # Usually installed here
+    path: "/usr/local/bin/syncthing"
     ppid: 1
-  - base: "rsyncd"  # System daemon, no ppid restriction
-    path_pattern: "/usr/*bin/rsyncd"
-  - base: "rsync"   # Command-line tool, no ppid restriction
-    path_pattern: "/usr/*bin/rsync"
-  - base: "Time Machine"
-    app_id: "com.apple.*"
-    path_pattern: "/System/*"  # Apple system app
-    ppid: 1
-  - base: "backupd"
-    app_id: "com.apple.*"
-    path_pattern: "/System/*"  # Apple system daemon
-    ppid: 1
+  # rsync/rsyncd now in unix.yaml
 
   # Popular cloud sync services (macOS versions)
   - base: "Dropbox"
-    team_id: "G7HH3F8CAK"  # Dropbox
+    team_id: "G7HH3F8CAK" # Dropbox
     ppid: 1
   - base: "Google Drive"
-    team_id: "EQHXZ8M8AV"  # Google
+    team_id: "EQHXZ8M8AV" # Google
     ppid: 1
   - base: "OneDrive"
-    team_id: "UBF8T346G9"  # Microsoft
+    team_id: "UBF8T346G9" # Microsoft
     ppid: 1
   - base: "Box Sync"
-    team_id: "M5N3QRBRRR"  # Box
+    team_id: "M5N3QRBRRR" # Box
     ppid: 1
 
-# Files and patterns to protect
-#
-# Note: File paths are normalized to ~ based on the file owner's home directory.
-# This means a pattern like "~/.ssh/id_*" will match:
-# - /Users/alice/.ssh/id_rsa (owned by alice)
-# - /home/bob/.ssh/id_ed25519 (owned by bob)
-# - /root/.ssh/id_ecdsa (owned by root)
-# No need to specify multiple patterns for different home directories!
+# macOS-specific protected files
 protected_files:
-  # SSH Keys and Known Hosts
-  - id: ssh_keys
-    patterns:
-      - "~/.ssh/id_*"
-      - "~/.ssh/*_key"
+  # ============================================================================
+  # USER KEYCHAIN FILES - Personal keychains
+  # ============================================================================
+  - id: user_keychain_files
+    paths:
+      - "~/Library/Keychains/*.keychain"
+      - "~/Library/Keychains/*.keychain-db"
+      - "~/Library/Keychains/*/keychain-2.db"
     allow:
-      # SSH tools from system paths and Homebrew
-      - base: "ssh"
-        euid: 501-599  # Regular user accounts on macOS
-      - base: "ssh-add"
+      # Security framework - must be user process
+      - base: "security"
         euid: 501-599
-      - base: "ssh-agent"
+      - base: "securityd"
         euid: 501-599
-      - base: "ssh-keygen"
+      # Apps that legitimately use user keychain - with team_id validation
+      - team_id: "EQHXZ8M8AV" # Google (Chrome)
         euid: 501-599
-      - base: "scp"
+      - team_id: "43AQ936H96" # Mozilla (Firefox)
         euid: 501-599
-      - base: "sftp"
+      - team_id: "KL8N8XSYF4" # Brave
         euid: 501-599
-      - base: "sshd"
-        euid: 0  # Root for system SSH daemon
-      - base: "git"
+      - team_id: "UBF8T346G9" # Microsoft
         euid: 501-599
-      - base: "rsync"
+      - team_id: "2JUAS4JW7F" # TablePlus
         euid: 501-599
-      # GitHub Desktop by team ID
-      - team_id: "VEKTX9H2N7"  # GitHub Desktop
+      - team_id: "W6LX9TZ93Q" # DBngin
         euid: 501-599
-      # GitHub CLI from Homebrew Cellar (versioned paths)
-      - base: "gh"
-        path_pattern: "/opt/homebrew/Cellar/gh/*/bin/*"
+      # Password managers accessing keychain
+      - team_id: "2BUA8C4S2C" # 1Password
+        euid: 501-599
+      - team_id: "LTZ2PFU5D6" # Bitwarden
+        euid: 501-599
+      # Apple apps accessing user keychain
+      - platform_binary: true
+        app_id: "com.apple.Safari*"
+        euid: 501-599
+      - platform_binary: true
+        app_id: "com.apple.mail*"
         euid: 501-599
 
-  # SSH Known Hosts (used for lateral movement/reconnaissance)
-  - id: ssh_known_hosts
-    pattern: "~/.ssh/known_hosts"
+  # ============================================================================
+  # SYSTEM KEYCHAIN FILES - System-wide keychains
+  # ============================================================================
+  - id: system_keychain_files
+    paths:
+      - "/Library/Keychains/*.keychain"
+      - "/Library/Keychains/*.keychain-db"
+      - "/System/Library/Keychains/*.keychain"
+      - "/System/Library/Keychains/*.keychain-db"
     allow:
-      # SSH tools that actually read/write known_hosts
-      - base: "ssh"
-        euid: 501-599
-      - base: "ssh-keygen"
-        euid: 501-599
-      - base: "ssh-keyscan"
-        euid: 501-599
-      - base: "scp"
-        euid: 501-599
-      - base: "sftp"
-        euid: 501-599
-      # Git (updates known_hosts when cloning)
-      - base: "git"
-        euid: 501-599
-      # rsync over SSH
-      - base: "rsync"
-        euid: 501-599
-      # Zsh (reads known_hosts for tab completion)
-      - base: "zsh"
-        euid: 501-599
+      # System processes only
+      - platform_binary: true
+        euid: 0 # Root only
+      # Security daemon running as root
+      - base: "securityd"
+        euid: 0
+      - base: "trustd"
+        euid: 0
+      # System services that need certificates
+      - base: "codesign"
+        euid: 0
+      - platform_binary: true
+        app_id: "com.apple.SecurityAgent"
+        euid: 0
 
-  # AWS Credentials
-  - id: aws_credentials
-    patterns:
-      - "~/.aws/credentials"
-      - "~/.aws/config"
-    allow:
-      # AWS CLI from standard locations
-      - base: "aws"
-        euid: 501-599
-      # Terraform by team ID
-      - team_id: "D38WU7D763"  # HashiCorp
-        euid: 501-599
-      # Ansible
-      - base: "ansible"
-        euid: 501-599
-      - base: "ansible-playbook"
-        euid: 501-599
-      # Packer
-      - base: "packer"
-        euid: 501-599
-      # Python for boto3 - must be from specific locations
-      - base: "python"
-        euid: 501-599
-      - base: "python3"
-        path_pattern: "~/.venv/*/bin/*"
-        euid: 501-599
-      - base: "python3"
-        path_pattern: "~/.*env/bin/*"
-        euid: 501-599
+  # ============================================================================
+  # BROWSER PASSWORD STORES - User data only
+  # ============================================================================
 
-  # Google Cloud
-  - id: gcloud_credentials
-    patterns:
-      - "~/.config/gcloud/credentials.db"
-      - "~/.config/gcloud/access_tokens.db"
-    allow:
-      # Google Cloud SDK tools
-      - base: "gcloud"
-        euid: 501-599
-      - base: "gsutil"
-        euid: 501-599
-      - base: "bq"
-        euid: 501-599
-      - base: "kubectl"
-        euid: 501-599
-      # Python used by gcloud
-      - base: "python"
-        euid: 501-599
-      - base: "python3"
-        euid: 501-599
-      - base: "Python"  # macOS Python wrapper
-        app_id: "com.apple.python3"
-        euid: 501-599
-
-  # Azure
-  - id: azure_credentials
-    patterns:
-      - "~/.azure/accessTokens.json"
-    allow:
-      - base: "az"
-      - base: "azure-cli"
-      - team_id: "UBF8T346G9"  # Microsoft (PowerShell)
-
-  # GPG Keys
-  - id: gpg_keys
-    patterns:
-      - "~/.gnupg/private-keys*"
-      - "~/.gnupg/secring.gpg"
-    allow:
-      - base: "gpg"
-      - base: "gpg2"
-      - base: "gpg-agent"
-      - base: "pinentry*"
-      - base: "pass"
-
-  # Package Manager Credentials
-  - id: npm_credentials
-    patterns:
-      - "~/.npmrc"
-    allow:
-      - base: "npm"
-      - base: "node"
-      - base: "yarn"
-      - base: "pnpm"
-
-  - id: python_credentials
-    patterns:
-      - "~/.pypirc"
-    allow:
-      - base: "python"
-      - base: "python3"
-      - base: "pip"
-      - base: "pip3"
-      - base: "twine"
-        path_pattern: "~/.local/bin/*"
-
-  - id: cargo_credentials
-    patterns:
-      - "~/.cargo/credentials"
-    allow:
-      - base: "cargo"
-        path_pattern: "~/.cargo/bin/*"
-      - base: "rustc"
-        path_pattern: "~/.cargo/bin/*"
-      - base: "rustup"
-        path_pattern: "~/.cargo/bin/*"
-
-  - id: docker_credentials
-    patterns:
-      - "~/.docker/config.json"
-    allow:
-      - base: "docker"
-      - base: "docker-compose"
-      - base: "docker-credential-desktop"
-      # Docker Desktop
-      - team_id: "9BNSXJN65R"  # Docker Inc
-
-  # Kubernetes
-  - id: kubernetes_config
-    patterns:
-      - "~/.kube/config"
-    allow:
-      - base: "kubectl"
-      - base: "helm"
-      - base: "k9s"
-      - base: "minikube"
-      # Lens
-      - team_id: "R6H3FQGQ9K"  # Mirantis (Lens)
-
-  # Browser Password Stores - Firefox
-  - id: firefox_passwords
-    patterns:
+  # Firefox (user profiles)
+  - id: user_firefox_passwords
+    paths:
       - "~/Library/Application Support/Firefox/Profiles/*/logins.json"
       - "~/Library/Application Support/Firefox/Profiles/*/key*.db"
-      - "~/Library/Application Support/Firefox/Profiles/*/cookies.sqlite"
     allow:
-      # Firefox
-      - team_id: "43AQ936H96"  # Mozilla
-      - base: "com.apple.Safari.BrowserDataImportingService"
-        app_id: "com.apple.*"
-        path_pattern: "/System/*"
-      # Apple system processes (like mdworker_shared for indexing)
-      - app_id: "com.apple.*"
-        path_pattern: "/System/*"
+      - team_id: "43AQ936H96" # Mozilla
+        euid: 501-599
+      - app_id: "org.mozilla.firefox"
+        euid: 501-599
 
-  # Zen Browser (Firefox-based)
-  - id: zen_browser_data
-    patterns:
+  # Safari - stores passwords in Keychain, not files
+  # Rule removed to reduce false positives
+
+  # Chrome (user profiles)
+  - id: user_chrome_passwords
+    paths:
+      - "~/Library/Application Support/Google/Chrome/*/Login Data"
+      - "~/Library/Application Support/Google/Chrome Beta/*/Login Data"
+      - "~/Library/Application Support/Google/Chrome Canary/*/Login Data"
+    allow:
+      - team_id: "EQHXZ8M8AV" # Google
+        euid: 501-599
+      - app_id: "com.google.Chrome*"
+        euid: 501-599
+
+  # Other browsers (user profiles)
+  - id: user_chromium_passwords
+    paths:
+      - "~/Library/Application Support/Chromium/*/Login Data"
+    allow:
+      - app_id: "org.chromium.Chromium"
+        euid: 501-599
+
+  - id: user_edge_passwords
+    paths:
+      - "~/Library/Application Support/Microsoft Edge/*/Login Data"
+    allow:
+      - team_id: "UBF8T346G9" # Microsoft
+        euid: 501-599
+
+  - id: user_brave_passwords
+    paths:
+      - "~/Library/Application Support/BraveSoftware/Brave-Browser/*/Login Data"
+    allow:
+      - team_id: "KL8N8XSYF4" # Brave Software
+        euid: 501-599
+
+  - id: user_arc_passwords
+    paths:
+      - "~/Library/Application Support/Arc/User Data/*/Login Data"
+    allow:
+      - team_id: "S6N382Y83G" # The Browser Company
+        euid: 501-599
+
+  - id: user_vivaldi_passwords
+    paths:
+      - "~/Library/Application Support/Vivaldi/*/Login Data"
+    allow:
+      - team_id: "4XF3XKFTU9" # Vivaldi Technologies
+        euid: 501-599
+
+  - id: user_opera_passwords
+    paths:
+      - "~/Library/Application Support/com.operasoftware.Opera/Login Data"
+      - "~/Library/Application Support/com.operasoftware.OperaGX/Login Data"
+    allow:
+      - team_id: "A2P9LX4JPN" # Opera Software
+        euid: 501-599
+
+  - id: user_zen_browser_data
+    paths:
       - "~/Library/Application Support/Zen/Profiles/*/logins.json"
       - "~/Library/Application Support/Zen/Profiles/*/key*.db"
-      - "~/Library/Application Support/Zen/Profiles/*/cookies.sqlite"
-      - "~/Library/Application Support/Zen/Profiles/*/places.sqlite"
-      - "~/Library/Application Support/Zen/Profiles/*/formhistory.sqlite"
-      - "~/Library/Application Support/Zen/Profiles/*/signons.sqlite"
     allow:
-      - team_id: "9V5K9TP787"  # Zen Browser
-
-  - pattern: "~/Library/Application Support/Zen/Profiles/*/cert*.db"
-    allow:
-      - base: "zen"
-        team_id: "9V5K9TP787"
-        ppid: 1
-      - base: "Zen"
-        team_id: "9V5K9TP787"
-        ppid: 1
-
-  # Browser Password Stores - Safari
-  - id: safari_passwords
-    patterns:
-      - "~/Library/Safari/Passwords.plist"
-      - "~/Library/Safari/Form Values"
-    allow:
-      # Safari and related Apple processes
-      - app_id: "com.apple.Safari*"
-      - base: "Safari*"
-        app_id: "com.apple.*"
-        ppid: 1
-      - base: "com.apple.Safari.SafariQuickLookPreview"
-        app_id: "com.apple.*"
-        path_pattern: "/System/*"
-      # Apple system processes (like mdworker_shared for indexing)
-      - app_id: "com.apple.*"
-        path_pattern: "/System/*"
-
-  # Browser Password Stores - Google Chrome (all variants)
-  - id: chrome_passwords
-    patterns:
-      # Chrome Stable - macOS
-      - "~/Library/Application Support/Google/Chrome/*/Login Data"
-      - "~/Library/Application Support/Google/Chrome/*/Cookies"
-      - "~/Library/Application Support/Google/Chrome/*/Web Data"
-      - "~/Library/Application Support/Google/Chrome/*/History"
-      - "~/Library/Application Support/Google/Chrome/*/Network/Cookies"
-      # Chrome Beta - macOS
-      - "~/Library/Application Support/Google/Chrome Beta/*/Login Data"
-      - "~/Library/Application Support/Google/Chrome Beta/*/Cookies"
-      - "~/Library/Application Support/Google/Chrome Beta/*/Web Data"
-      - "~/Library/Application Support/Google/Chrome Beta/*/History"
-      - "~/Library/Application Support/Google/Chrome Beta/*/Network/Cookies"
-      # Chrome Canary - macOS
-      - "~/Library/Application Support/Google/Chrome Canary/*/Login Data"
-      - "~/Library/Application Support/Google/Chrome Canary/*/Cookies"
-      - "~/Library/Application Support/Google/Chrome Canary/*/Web Data"
-      - "~/Library/Application Support/Google/Chrome Canary/*/History"
-      - "~/Library/Application Support/Google/Chrome Canary/*/Network/Cookies"
-    allow:
-      # Google Chrome (all variants have same team ID)
-      - team_id: "EQHXZ8M8AV"  # Google (includes Chrome, Beta, Canary, and all helpers)
-
-  - id: chromium_passwords
-    patterns:
-      - "~/Library/Application Support/Chromium/*/Login Data"
-      - "~/Library/Application Support/Chromium/*/Cookies"
-      - "~/Library/Application Support/Chromium/*/Web Data"
-    allow:
-      # Chromium open source builds
-      - base: "Chromium"
-      - team_id: "HBNNCSQXW2"  # The Chromium Authors
-
-  # Edge (Chromium-based)
-  - id: edge_passwords
-    patterns:
-      - "~/Library/Application Support/Microsoft Edge/*/Login Data"
-      - "~/Library/Application Support/Microsoft Edge/*/Cookies"
-      - "~/Library/Application Support/Microsoft Edge/*/Web Data"
-    allow:
-      - team_id: "UBF8T346G9"  # Microsoft
-
-  # Brave (Chromium-based)
-  - id: brave_passwords
-    patterns:
-      - "~/Library/Application Support/BraveSoftware/Brave-Browser/*/Login Data"
-      - "~/Library/Application Support/BraveSoftware/Brave-Browser/*/Cookies"
-      - "~/Library/Application Support/BraveSoftware/Brave-Browser/*/Web Data"
-    allow:
-      - team_id: "KL8N8XSYF4"  # Brave Software
-
-  # macOS Keychain - Most permissive since many apps need it
-  - pattern: "~/Library/Keychains/login.keychain-db"
-    allow:
-      # Apple system processes (including WiFiAgent from /System)
-      - app_id: "com.apple.*"
-        path_pattern: "/System/*"
-
-      # Any legitimate app from standard app locations with ppid=1 and user EUID
-      # EUID range 501-599 represents regular user accounts on macOS
-      - path_pattern: "/Applications/*.app/Contents/MacOS/*"
-        ppid: 1
+      - team_id: "9V5K9TP787" # Zen Browser team ID
         euid: 501-599
-      - path_pattern: "/Applications/*/*.app/Contents/MacOS/*"
-        ppid: 1
-        euid: 501-599
-      - path_pattern: "/System/Applications/*/*.app/Contents/MacOS/*"
-        ppid: 1
-        euid: 501-599
-      - path_pattern: "~/Applications/*/*.app/Contents/MacOS/*"
-        ppid: 1
-        euid: 501-599
-      - path_pattern: "/Applications/Utilities/*/*.app/Contents/MacOS/*"
-        ppid: 1
+      - app_id: "io.zen.browser"
         euid: 501-599
 
-      # Homebrew Cask apps
-      - path_pattern: "/opt/homebrew/Caskroom/*/*.app/Contents/MacOS/*"
-        ppid: 1
+  # ============================================================================
+  # PASSWORD MANAGERS - User data only
+  # ============================================================================
 
-      # Command-line tools that legitimately need keychain
-      - base: "security"
-      - base: "codesign"
-      # Hardcoded path for Apple's security tool
-      - path: "/usr/bin/security"
-
-  - pattern: "~/Library/Keychains/*.keychain-db"
+  - id: user_1password
+    paths:
+      - "~/Library/Group Containers/*.com.1password/Library/Application Support/1Password/*"
+      - "~/Library/Application Support/1Password/*"
+      - "~/Library/Containers/com.1password*/Data/*"
     allow:
-      # Apple system processes
-      - app_id: "com.apple.*"
-
-      # Security tools
-      - base: "security"
-      - base: "Keychain Access"
-        app_id: "com.apple.*"
-        ppid: 1
-      # Hardcoded path for Apple's security tool
-      - path: "/usr/bin/security"
-
-  # Password Managers
-  - pattern: "~/.password-store/**/*.gpg"
-    allow:
-      - base: "pass"
-      - base: "gpg"
-      - base: "gpg2"
-
-  - pattern: "~/Library/Application Support/1Password*/**"
-    allow:
-      - team_id: "2BUA8C4S2C"  # AgileBits (1Password)
-      - base: "op"  # 1Password CLI
-
-  - pattern: "~/Library/Application Support/Bitwarden/**"
-    allow:
-      - team_id: "LTZ2PFU5D6"  # Bitwarden
-      - base: "bw"  # Bitwarden CLI
-
-  - pattern: "~/Library/Application Support/Keeper/**"
-    allow:
-      - team_id: "62QZF3SA9E"  # Keeper Security
-
-  - pattern: "~/Library/Containers/com.lastpass.*/**"
-    allow:
-      - team_id: "N24REP3BMN"  # LastPass
-
-  # Email Clients
-  - pattern: "~/Library/Mail/V*/MailData/Accounts.plist"
-    allow:
-      - app_id: "com.apple.mail"
-        ppid: 1
-
-  - pattern: "~/Library/Thunderbird/Profiles/*/logins.json"
-    allow:
-      - team_id: "43AQ936H96"  # Mozilla (Thunderbird)
-
-  - pattern: "~/Library/Group Containers/*.ms-outlook/**"
-    allow:
-      - team_id: "UBF8T346G9"  # Microsoft (Outlook)
-
-  # Development Tools
-  # Xcode
-  - pattern: "~/Library/Developer/Xcode/UserData/Accounts/*"
-    allow:
-      - app_id: "com.apple.dt.Xcode"
-        ppid: 1
-
-  # FileZilla
-  - pattern: "~/.config/filezilla/sitemanager.xml"
-    allow:
-      - team_id: "PBF8WR8TCB"  # FileZilla
-
-  - pattern: "~/.config/filezilla/recentservers.xml"
-    allow:
-      - team_id: "PBF8WR8TCB"  # FileZilla
-
-  # Shell History Files (often contain passwords in commands)
-  - id: shell_history
-    patterns:
-      - "~/.bash_history"
-      - "~/.zsh_history"
-      - "~/.fish_history"
-      - "~/.history"
-    allow:
-      # Only shells should access history files
-      - base: "bash"
-        euid: 501-599
-      - base: "zsh"
-        euid: 501-599
-      - base: "fish"
-        euid: 501-599
-      - base: "sh"
-        euid: 501-599
-      - base: "tcsh"
-        euid: 501-599
-      # Terminal emulators that might read history
-      - base: "Terminal"
-        app_id: "com.apple.*"
-        euid: 501-599
-      - base: "iTerm*"
-        team_id: "H7V7XYVQ7D"  # iTerm2
-        euid: 501-599
-      - base: "wezterm*"
-        euid: 501-599
-      - base: "kitty"
-        euid: 501-599
-      - base: "alacritty"
+      - team_id: "2BUA8C4S2C" # AgileBits (1Password)
         euid: 501-599
 
-  # Environment files with API keys and secrets
-  - id: env_files
-    patterns:
-      - "~/.env"
-      - "~/.envrc"
-      - "~/**/.env"
-      - "~/**/.env.*"
+  - id: user_bitwarden
+    paths:
+      - "~/Library/Application Support/Bitwarden/*"
     allow:
-      # Development tools that legitimately read .env files
-      - base: "node"
-      - base: "python*"
-      - base: "ruby"
-      - base: "direnv"
-      - base: "docker"
-      - base: "docker-compose"
-      # IDEs
-      - team_id: "2ZEFAR8TH3"  # JetBrains
-      - app_id: "com.microsoft.VSCode"
-      - app_id: "com.sublimetext.*"
-
-  # Cryptocurrency Wallets - EXTREMELY HIGH VALUE TARGETS
-  - id: bitcoin_wallets
-    patterns:
-      - "~/Library/Application Support/Bitcoin/wallet.dat"
-      - "~/Library/Application Support/Bitcoin/wallets/*.dat"
-    allow:
-      - base: "Bitcoin-Qt"
-        euid: 501-599
-      - base: "bitcoin-qt"
-        euid: 501-599
-      - team_id: "Z4JV4P65TM"  # Bitcoin Core
+      - team_id: "LTZ2PFU5D6" # Bitwarden
         euid: 501-599
 
-  - id: electrum_wallet
-    patterns:
-      - "~/.electrum/wallets/*"
+  - id: user_keepassxc
+    paths:
+      - "~/*.kdbx"
+      - "~/Documents/*.kdbx"
+      - "~/Desktop/*.kdbx"
     allow:
-      - base: "Electrum"
-        euid: 501-599
-      - team_id: "L6EQ83Q3B7"  # Electrum
-        euid: 501-599
-
-  - id: ethereum_wallets
-    patterns:
-      - "~/Library/Ethereum/keystore/*"
-      - "~/.ethereum/keystore/*"
-    allow:
-      - base: "Geth"
-      - base: "Mist"
-      - team_id: "XJ4K9XNR66"  # Ethereum
-
-  - id: exodus_wallet
-    patterns:
-      - "~/Library/Application Support/Exodus/exodus.wallet/*"
-    allow:
-      - base: "Exodus"
-      - team_id: "BMJJBXD3S8"  # Exodus
-
-  - id: atomic_wallet
-    patterns:
-      - "~/Library/Application Support/atomic/Local Storage/leveldb/*"
-    allow:
-      - base: "Atomic Wallet"
-      - team_id: "M4MFYQMXN9"  # Atomic
-
-  - id: ledger_live
-    patterns:
-      - "~/Library/Application Support/Ledger Live/*"
-    allow:
-      - base: "Ledger Live"
-      - team_id: "53N4VKA4BU"  # Ledger
-
-  - id: monero_wallet
-    patterns:
-      - "~/Monero/wallets/*"
-      - "~/.bitmonero/*"
-    allow:
-      - base: "monero-wallet-gui"
-      - base: "monerod"
-
-  # Communication Apps
-  - id: discord_tokens
-    patterns:
-      - "~/Library/Application Support/discord/Local Storage/leveldb/*"
-      - "~/Library/Application Support/discord/Local State"
-      - "~/Library/Application Support/discord/Cookies"
-    allow:
-      - base: "Discord"
-        euid: 501-599
-      - team_id: "53Q6R32WPB"  # Discord
+      - team_id: "G2S7P7J672" # KeePassXC Team
         euid: 501-599
 
-  - id: slack_data
-    patterns:
-      - "~/Library/Application Support/Slack/Local Storage/leveldb/*"
-      - "~/Library/Application Support/Slack/Cookies"
-      - "~/Library/Application Support/Slack/storage/*"
+  - id: user_lastpass
+    paths:
+      - "~/Library/Application Support/LastPass/*"
+      - "~/Library/Containers/com.lastpass.*/Data/*"
     allow:
-      - base: "Slack"
-        euid: 501-599
-      - team_id: "BQR82RAZA9"  # Slack
+      - team_id: "N24REP3BMN" # LogMeIn (LastPass)
         euid: 501-599
 
-  - id: signal_data
-    patterns:
-      - "~/Library/Application Support/Signal/sql/*"
-      - "~/Library/Application Support/Signal/config.json"
-      - "~/Library/Application Support/Signal/Local Storage/leveldb/*"
+  - id: user_dashlane
+    paths:
+      - "~/Library/Application Support/Dashlane/*"
+      - "~/Library/Containers/com.dashlane.*/Data/*"
     allow:
-      - base: "Signal"
-      - team_id: "U68MSDN6DR"  # Signal
+      - team_id: "Z3L9C9V3A4" # Dashlane
+        euid: 501-599
 
-  - id: telegram_data
-    patterns:
-      - "~/Library/Application Support/Telegram Desktop/tdata/*"
+  # ============================================================================
+  # MAIL AND MESSAGING - User accounts
+  # ============================================================================
+
+  - id: user_mail_accounts
+    paths:
+      - "~/Library/Mail/V*/MailData/Accounts.plist"
+      - "~/Library/Mail/V*/MailData/*/Info.plist"
+      - "~/Library/Containers/com.apple.mail/Data/Library/Mail/*"
     allow:
-      - base: "Telegram"
-      - team_id: "6N38VWS5BX"  # Telegram
+      - platform_binary: true
+        app_id: "com.apple.mail*"
+        euid: 501-599
 
-  # Gaming Platforms
-  - id: steam_credentials
-    patterns:
-      - "~/Library/Application Support/Steam/config/loginusers.vdf"
-      - "~/Library/Application Support/Steam/config/config.vdf"
+  - id: user_messages
+    paths:
+      - "~/Library/Messages/*"
+      - "~/Library/Containers/com.apple.iChat/Data/Library/Messages/*"
     allow:
-      - base: "Steam"
-      - base: "steamcmd"
-      - team_id: "MXGJJ98X76"  # Valve
+      - platform_binary: true
+        app_id: "com.apple.iChat*"
+        euid: 501-599
+      - platform_binary: true
+        app_id: "com.apple.Messages*"
+        euid: 501-599
 
-  # VPN Configurations
-  - id: openvpn_profiles
-    patterns:
-      - "~/Library/Application Support/OpenVPN Connect/profiles/*"
-      - "~/.config/openvpn/*"
+  # ============================================================================
+  # DATABASE CLIENTS - User credentials
+  # ============================================================================
+
+  # TablePlus
+  - id: user_tableplus
+    paths:
+      - "~/Library/Application Support/com.tinyapp.TablePlus/Data/*"
     allow:
-      - base: "OpenVPN Connect"
-      - team_id: "ACV7L3WCD8"  # OpenVPN
+      - team_id: "2JUAS4JW7F" # TablePlus
+        euid: 501-599
 
-  - id: wireguard_configs
-    patterns:
-      - "/usr/local/etc/wireguard/*.conf"
-      - "~/.config/wireguard/*.conf"
+  # Sequel Pro/Ace (migration path - same data format)
+  - id: user_sequel
+    paths:
+      - "~/Library/Application Support/Sequel Pro/Data/*"
+      - "~/Library/Application Support/Sequel Ace/Data/*"
     allow:
-      - base: "WireGuard"
-      - team_id: "5357M5NW9W"  # WireGuard
-      - base: "wg"
-      - base: "wg-quick"
+      - team_id: "J2DVJ297PV" # Sequel Ace
+        euid: 501-599
+      # Note: Sequel Pro is discontinued, Sequel Ace is the successor
 
-  # FTP/File Transfer Clients (in addition to FileZilla)
-  - id: cyberduck_bookmarks
-    patterns:
-      - "~/Library/Group Containers/G69SCX94XU.duck/Library/Application Support/duck/Bookmarks/*"
-      - "~/Library/Group Containers/G69SCX94XU.duck/Library/Application Support/duck/Credentials/*"
+  # Postico (PostgreSQL client)
+  - id: user_postico
+    paths:
+      - "~/Library/Containers/at.eggerapps.Postico/Data/Library/Application Support/Postico/*"
     allow:
-      - base: "Cyberduck"
-      - team_id: "G69SCX94XU"  # iterate GmbH (Cyberduck)
+      - team_id: "9QTB3B3YMV" # Postico
+        euid: 501-599
 
-  - id: transmit_favorites
-    patterns:
+  # Navicat
+  - id: user_navicat
+    paths:
+      - "~/Library/Application Support/PremiumSoft CyberTech/Navicat CC/*"
+    allow:
+      - team_id: "2V7428H326" # Navicat
+        euid: 501-599
+
+  # ============================================================================
+  # DEVELOPMENT TOOLS - User credentials
+  # ============================================================================
+
+  # Git Tower
+  - id: user_tower_git
+    paths:
+      - "~/Library/Application Support/com.fournova.Tower3/config/*"
+    allow:
+      - team_id: "MLT7M394S7" # Fournova (Tower)
+        euid: 501-599
+
+  # Sourcetree (Atlassian Git client)
+  - id: user_sourcetree
+    paths:
+      - "~/Library/Application Support/SourceTree/*"
+    allow:
+      - team_id: "UPXU4CQZ5P" # Atlassian (Sourcetree)
+        euid: 501-599
+
+  # Fork Git Client
+  - id: user_fork_git
+    paths:
+      - "~/Library/Application Support/Fork/*"
+    allow:
+      - team_id: "Q9PTD2P6MJ" # Fork
+        euid: 501-599
+
+  # GitKraken
+  - id: user_gitkraken
+    paths:
+      - "~/Library/Application Support/GitKraken/*"
+    allow:
+      - team_id: "HV6GQZR9ZK" # Axosoft (GitKraken)
+        euid: 501-599
+
+  # Transmit (FTP/SFTP client - different category than Git clients)
+  - id: user_transmit
+    paths:
       - "~/Library/Application Support/Transmit/*"
       - "~/Library/Preferences/com.panic.Transmit.plist"
     allow:
-      - base: "Transmit*"
-      - team_id: "VE8FC488U5"  # Panic (Transmit)
+      - team_id: "VE8FC488U5" # Panic (Transmit)
+        euid: 501-599
 
-  # Database Clients (keep separate - each should only access own credentials)
-  # TablePlus
-  - id: tableplus_connections
-    patterns:
-      - "~/Library/Application Support/com.tinyapp.TablePlus/Data/Connections.plist"
+  - id: user_github_desktop
+    paths:
+      - "~/Library/Application Support/GitHub Desktop/*"
+      - "~/Library/Application Support/com.github.GitHubClient/*"
     allow:
-      - team_id: "3X57WD8ENQ"  # TablePlus
-
-  # Sequel Pro
-  - id: sequel_pro_connections
-    patterns:
-      - "~/Library/Application Support/Sequel Pro/Data/Favorites.plist"
-    allow:
-      - base: "Sequel Pro"
-        ppid: 1
-
-  # DBeaver
-  - id: dbeaver_connections
-    patterns:
-      - "~/.dbeaver/credentials-config.json"
-    allow:
-      - base: "dbeaver"
-        ppid: 1
-      - base: "DBeaver"
-        ppid: 1
-
-  # Postman
-  - pattern: "~/Library/Application Support/Postman/storage/*"
-    allow:
-      - team_id: "H7LP8A9S8Q"  # Postman
-
-  # Insomnia
-  - pattern: "~/Library/Application Support/Insomnia/insomnia.*.db"
-    allow:
-      - team_id: "FX44YY62GV"  # Kong (Insomnia)
-
-  # RDP Connection Files
-  - pattern: "~/Documents/*.rdp"
-    allow:
-      - team_id: "UBF8T346G9"  # Microsoft (Remote Desktop)
-
-  # VPN Configurations
-  - id: vpn_configs
-    patterns:
-      - "~/Library/Application Support/Viscosity/OpenVPN/*"
-      - "~/Library/Application Support/Tunnelblick/Configurations/*"
-    allow:
-      - team_id: "34XR7GXFPX"  # SparkLabs (Viscosity)
-      - base: "Tunnelblick"
-        ppid: 1
-
-  # FTP/SFTP Clients (keep separate - each should only access own bookmarks)
-  # Cyberduck
-  - id: cyberduck_bookmarks
-    patterns:
-      - "~/Library/Group Containers/G69SCX94XU.duck/Library/Application Support/duck/Bookmarks/*"
-    allow:
-      - team_id: "G69SCX94XU"  # iterate (Cyberduck)
-
-  # Transmit
-  - id: transmit_favorites
-    patterns:
-      - "~/Library/Application Support/Transmit/Favorites/*"
-    allow:
-      - team_id: "VE8FC488U5"  # Panic (Transmit)
-
-  # Git Clients (keep separate - each should only access own credentials)
-  # GitHub Desktop
-  - id: github_desktop_accounts
-    patterns:
-      - "~/Library/Application Support/GitHub Desktop/storage/userData.json"
-    allow:
-      - team_id: "VEKTX9H2N7"  # GitHub Desktop
-
-  # SourceTree
-  - id: sourcetree_accounts
-    patterns:
-      - "~/Library/Application Support/SourceTree/accounts.json"
-    allow:
-      - team_id: "UPXU4CQZ5P"  # Atlassian (SourceTree)
-
-  # GitKraken
-  - id: gitkraken_profiles
-    patterns:
-      - "~/.gitkraken/profiles/*"
-    allow:
-      - team_id: "HV6GQZR9ZK"  # Axosoft (GitKraken)
-
-  # Shell History Files
-  - id: shell_history
-    patterns:
-      # Bash
-      - "~/.bash_history"
-      # Zsh
-      - "~/.zsh_history"
-      - "~/.zhistory"
-      # Fish
-      - "~/.local/share/fish/fish_history"
-    allow:
-      # Only shells themselves should read/write their history
-      - base: "bash"
-      - base: "zsh"
-      - base: "fish"
-      # Fish from Homebrew (versioned paths)
-      - base: "fish"
-        path_pattern: "/opt/homebrew/Cellar/fish/*/bin/fish"
-      - base: "sh"
-
-# Patterns to exclude from monitoring (not sensitive)
-excluded_patterns:
-  - "*.pub"               # Public keys
-  - "*.pem"              # Often certificates (though could be private keys)
-  - "authorized_keys"     # SSH authorized keys file
+      - team_id: "VEKTX9H2N7" # GitHub Desktop
+        euid: 501-599
 
 # Default base paths for macOS
 default_base_paths:
@@ -776,20 +359,15 @@ default_base_paths:
   - /usr/local/sbin
   - /opt/homebrew/bin
   - /opt/homebrew/sbin
-  - /opt/homebrew/Cellar/*/bin
   - /opt/homebrew/Cellar/*/*/bin
-  - /opt/homebrew/Cellar/*/sbin
-  - /opt/homebrew/Cellar/*/*/sbin
-  - /nix/store/*/bin  # Nix packages
-  - /run/current-system/sw/bin  # NixOS system packages
-  - ~/.nix-profile/bin  # User nix packages
-  - /Applications/*/Contents/MacOS
-  - /Applications/*/*/Contents/MacOS
-  - ~/Applications/*/Contents/MacOS
-  - /System/Applications/*/Contents/MacOS
-  - /System/Volumes/Preboot/Cryptexes/App/System/Applications/*/Contents/XPCServices/*/Contents/MacOS
+  - "/Applications/*/Contents/MacOS"
+  - "/Applications/*/Contents/Helpers"
+  - "/System/Applications/*/Contents/MacOS"
+  - "/System/Applications/Utilities/*/Contents/MacOS"
 
-# Monitoring configuration
-monitoring:
-  buffer_size: 1000
-  max_events_per_sec: 100
+# Patterns to exclude from monitoring (not sensitive)
+excluded_patterns:
+  - "*.pub" # Public keys
+  - "*.crt" # Certificates
+  - "*.cer" # Certificates
+  - "authorized_keys" # SSH authorized keys file

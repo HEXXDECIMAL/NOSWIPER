@@ -6,6 +6,7 @@ use anyhow::Result;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncBufReadExt, BufReader};
 
 pub struct FreeBSDMonitor {
@@ -107,7 +108,6 @@ proc:::exec-success
 
     async fn handle_open_event(&mut self, json: &serde_json::Value) -> Result<()> {
         let pid = json.get("pid").and_then(|p| p.as_u64()).map(|p| p as u32);
-
         let ppid = json.get("ppid").and_then(|p| p.as_u64()).map(|p| p as u32);
 
         let process_name = json
@@ -141,10 +141,45 @@ proc:::exec-success
             return Ok(());
         }
 
-        // Check if access is allowed
+        // Build process tree for logging
+        let process_tree = if let Some(pid) = pid {
+            self.build_process_tree(pid, 2)
+        } else {
+            String::from("Process tree unavailable")
+        };
+
+        log::info!(
+            "PROTECTED FILE ACCESS: {} (PID {}) -> {}\nProcess tree:\n{}",
+            process_path.display(),
+            pid.map_or(String::from("?"), |p| p.to_string()),
+            file_path,
+            process_tree
+        );
+
+        // Get process info for context
+        let (uid, _cmdline) = if let Some(p) = pid {
+            self.get_process_info(p)
+        } else {
+            (None, None)
+        };
+
+        // Create process context for the new rule system
+        use crate::process_context::ProcessContext;
+        let context = ProcessContext {
+            path: process_path.clone(),
+            pid,
+            ppid,
+            team_id: None, // Not available on FreeBSD
+            app_id: None,  // Not available on FreeBSD
+            args: None,    // Could get from procstat
+            uid,
+            euid: uid,     // Using same as UID for simplicity
+        };
+
+        // Check if access is allowed using new context-aware method
         let decision = self
             .rule_engine
-            .check_access(&process_path, &file_path_buf, None);
+            .check_access_with_context(&context, &file_path_buf);
 
         match decision {
             Decision::Allow => {
@@ -301,5 +336,168 @@ proc:::exec-success
             // Send SIGSTOP to the process
             libc::kill(pid as libc::pid_t, libc::SIGSTOP) == 0
         }
+    }
+
+    /// Get parent PID using procstat
+    fn get_parent_pid(&self, pid: u32) -> Option<u32> {
+        Command::new("procstat")
+            .args(&["-h", "ppid", &pid.to_string()])
+            .output()
+            .ok()
+            .and_then(|output| {
+                if output.status.success() {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    stdout
+                        .split_whitespace()
+                        .nth(1) // Second field is PPID
+                        .and_then(|ppid_str| ppid_str.parse::<u32>().ok())
+                } else {
+                    None
+                }
+            })
+    }
+
+    /// Get process info including UID
+    fn get_process_info(&self, pid: u32) -> (Option<u32>, Option<String>) {
+        // Get UID using procstat
+        let uid = Command::new("procstat")
+            .args(&["-h", "cred", &pid.to_string()])
+            .output()
+            .ok()
+            .and_then(|output| {
+                if output.status.success() {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    // Format: PID COMM EUID RUID SVUID EGID RGID SVGID GROUPS
+                    stdout
+                        .split_whitespace()
+                        .nth(3) // RUID is 4th field
+                        .and_then(|uid_str| uid_str.parse::<u32>().ok())
+                } else {
+                    None
+                }
+            });
+
+        // Get command line
+        let cmdline = Command::new("procstat")
+            .args(&["-h", "args", &pid.to_string()])
+            .output()
+            .ok()
+            .and_then(|output| {
+                if output.status.success() {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    // Skip PID and get rest
+                    let parts: Vec<&str> = stdout.split_whitespace().collect();
+                    if parts.len() > 1 {
+                        Some(parts[1..].join(" "))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            });
+
+        (uid, cmdline)
+    }
+
+    /// Build a visual process tree for logging
+    fn build_process_tree(&self, pid: u32, max_levels: usize) -> String {
+        let mut tree = Vec::new();
+        let mut current_pid = Some(pid);
+        let mut level = 0;
+
+        while let Some(p) = current_pid {
+            if level >= max_levels || p <= 1 {
+                break;
+            }
+
+            let indent = "  ".repeat(level);
+            let prefix = if level == 0 { "→" } else { "└─" };
+
+            let (uid, cmdline) = self.get_process_info(p);
+            let process_path = self.get_process_path(p)
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "?".to_string());
+
+            let display_cmd = cmdline.unwrap_or_else(|| process_path.clone());
+
+            tree.push(format!(
+                "{}{} [{}] {} (uid={})",
+                indent,
+                prefix,
+                p,
+                if display_cmd.len() > 100 {
+                    format!("{}...", &display_cmd[..100])
+                } else {
+                    display_cmd
+                },
+                uid.unwrap_or(0)
+            ));
+
+            // Get parent PID for next iteration
+            current_pid = self.get_parent_pid(p);
+            level += 1;
+        }
+
+        if tree.is_empty() {
+            tree.push(format!("→ [{}] (process info unavailable)", pid));
+        }
+
+        tree.join("\n")
+    }
+
+    /// Discover protected files from YAML configuration
+    fn discover_protected_files(&self) -> Vec<PathBuf> {
+        let mut paths = Vec::new();
+
+        // Get user home directories
+        let users = self.get_user_homes();
+
+        // Process each protected file pattern from the YAML configuration
+        for protected_file in &self.rule_engine.config.protected_files {
+            for pattern_str in protected_file.patterns() {
+                // Expand patterns for all users
+                for user_home in &users {
+                    let expanded_pattern = pattern_str.replacen('~', &user_home.to_string_lossy(), 1);
+
+                    // Use glob to find matching files
+                    if let Ok(entries) = glob::glob(&expanded_pattern) {
+                        for entry in entries.flatten() {
+                            if entry.is_file() && entry.exists() {
+                                paths.push(entry);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Remove duplicates
+        paths.sort();
+        paths.dedup();
+        paths
+    }
+
+    /// Get user home directories on FreeBSD
+    fn get_user_homes(&self) -> Vec<PathBuf> {
+        let mut homes = Vec::new();
+
+        // Read /etc/passwd
+        if let Ok(passwd) = std::fs::read_to_string("/etc/passwd") {
+            for line in passwd.lines() {
+                let parts: Vec<&str> = line.split(':').collect();
+                if parts.len() >= 6 {
+                    let home = parts[5];
+                    if home.starts_with("/home/") || home == "/root" {
+                        let home_path = PathBuf::from(home);
+                        if home_path.exists() {
+                            homes.push(home_path);
+                        }
+                    }
+                }
+            }
+        }
+
+        homes
     }
 }
