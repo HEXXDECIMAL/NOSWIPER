@@ -271,7 +271,7 @@ impl DTraceMonitor {
             .check_access(&process_path, &file_path_buf, None);
 
         match decision {
-            Decision::Allow => {
+            Decision::Allow(_) => {
                 log::info!(
                     "{}[{}/ppid:{}]: open {}: OK (allowed)",
                     process_path.display(),
@@ -283,7 +283,7 @@ impl DTraceMonitor {
             Decision::NotProtected => {
                 // Not a protected file, don't log
             }
-            Decision::Deny => {
+            Decision::Deny(_) => {
                 match self.mode {
                     Mode::Monitor => {
                         log::warn!(

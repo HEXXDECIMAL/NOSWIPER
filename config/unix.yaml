@@ -12,7 +12,7 @@ protected_files:
   # ============================================================================
   # USER SSH KEYS - Personal credentials
   # ============================================================================
-  - id: user_ssh_keys
+  - id: ssh
     paths:
       - "~/.ssh/id_*"
       - "~/.ssh/*_key"
@@ -43,7 +43,7 @@ protected_files:
   # ============================================================================
   # SYSTEM SSH HOST KEYS - System-wide server keys
   # ============================================================================
-  - id: system_ssh_host_keys
+  - id: ssh_host
     paths:
       - "/etc/ssh/ssh_host_*_key"
       - "/etc/ssh_host_*_key" # Some systems put them here
@@ -61,7 +61,7 @@ protected_files:
   # ============================================================================
   # ROOT SSH KEYS - Root user's personal SSH keys
   # ============================================================================
-  - id: root_ssh_keys
+  - id: root_ssh
     paths:
       - "/root/.ssh/id_*"
       - "/root/.ssh/*_key"
@@ -82,7 +82,7 @@ protected_files:
   # ============================================================================
   # USER GPG KEYS - Personal encryption keys
   # ============================================================================
-  - id: user_gpg_keys
+  - id: gpg
     paths:
       - "~/.gnupg/private-keys-v1.d/*"
       - "~/.gnupg/secring.gpg"
@@ -120,14 +120,18 @@ protected_files:
       - "/var/root/.bash_history"
     allow:
       - base: "bash"
-        arg: "-l"
-      - base: "bash"
-        arg: "-i"
+        euid: 501-65533
       - base: "mcfly"
         euid: 501-65533
       - base: "atuin"
         euid: 501-65533
       - base: "fzf"
+        euid: 501-65533
+      - base: "tail"  # For reading last commands
+        euid: 501-65533
+      - base: "head"
+        euid: 501-65533
+      - base: "cat"
         euid: 501-65533
 
   # Zsh history
@@ -188,7 +192,7 @@ protected_files:
   # ============================================================================
 
   # AWS Credentials (actual secrets only, not config)
-  - id: user_aws_credentials
+  - id: aws
     paths:
       - "~/.aws/credentials" # Contains access keys and secrets
       # NOT including ~/.aws/config which only has region/profile settings
@@ -239,7 +243,7 @@ protected_files:
         euid: 501-65533
 
   # AWS Session tokens (temporary credentials)
-  - id: user_aws_session_tokens
+  - id: aws_session
     paths:
       - "~/.aws/cli/cache/*.json" # Session tokens from SSO/assume-role
     allow:
@@ -250,7 +254,7 @@ protected_files:
 
   # Google Cloud Application Default Credentials
   # These can be used by ANY application using GCP client libraries
-  - id: user_gcp_application_default_credentials
+  - id: gcp_adc
     paths:
       - "~/.config/gcloud/application_default_credentials.json"
       - "~/.config/gcloud/legacy_credentials/*/adc.json"
@@ -262,7 +266,7 @@ protected_files:
 
   # Google Cloud CLI-specific credentials
   # These are only used by gcloud CLI and related tools
-  - id: user_gcloud_cli_credentials
+  - id: gcloud
     paths:
       - "~/.config/gcloud/access_tokens.db"
       - "~/.config/gcloud/credentials.db"
@@ -286,7 +290,7 @@ protected_files:
 
   # Google Cloud Service Account Keys
   # These JSON files can be stored anywhere and used by any app
-  - id: gcp_service_account_keys
+  - id: gcp_sa
     paths:
       - "~/*-key.json" # Common pattern for service account keys
       - "~/Downloads/*-key.json" # Often downloaded here
@@ -299,7 +303,7 @@ protected_files:
         # Note: Hard to restrict by binary since any app can use these
 
   # Azure Credentials (actual secrets only)
-  - id: user_azure_credentials
+  - id: azure
     paths:
       # Access tokens and refresh tokens
       - "~/.azure/accessTokens.json"
@@ -329,7 +333,7 @@ protected_files:
         euid: 501-65533
 
   # DigitalOcean Credentials
-  - id: user_digitalocean_credentials
+  - id: digitalocean
     paths:
       - "~/.config/doctl/config.yaml" # Contains access tokens
     allow:
@@ -339,7 +343,7 @@ protected_files:
         euid: 501-65533
 
   # Linode/Akamai Credentials
-  - id: user_linode_credentials
+  - id: linode
     paths:
       - "~/.config/linode-cli" # Contains API tokens
     allow:
@@ -349,7 +353,7 @@ protected_files:
         euid: 501-65533
 
   # Oracle Cloud Infrastructure Credentials
-  - id: user_oci_credentials
+  - id: oci
     paths:
       - "~/.oci/config" # Contains private keys and fingerprints
       - "~/.oci/*_key.pem" # Private keys for API access
@@ -360,7 +364,7 @@ protected_files:
         euid: 501-65533
 
   # IBM Cloud Credentials
-  - id: user_ibmcloud_credentials
+  - id: ibmcloud
     paths:
       - "~/.bluemix/config.json" # Contains API keys
       - "~/.ibm-cloud/config.json"
@@ -371,7 +375,7 @@ protected_files:
         euid: 501-65533
 
   # Kubernetes Configurations (contains cluster auth tokens/certs)
-  - id: user_kubernetes_config
+  - id: kubernetes
     paths:
       - "~/.kube/config"
       - "~/.kube/*-config"
@@ -393,7 +397,7 @@ protected_files:
         euid: 501-65533
 
   # Docker Credentials
-  - id: user_docker_credentials
+  - id: docker
     paths:
       - "~/.docker/config.json"
     allow:
@@ -408,7 +412,7 @@ protected_files:
         euid: 501-65533
 
   # Vercel/Now Credentials
-  - id: user_vercel_credentials
+  - id: vercel
     paths:
       - "~/.now/auth.json"
       - "~/.vercel/auth.json"
@@ -419,7 +423,7 @@ protected_files:
         euid: 501-65533
 
   # Netlify Credentials
-  - id: user_netlify_credentials
+  - id: netlify
     paths:
       - "~/.netlify/config.json" # Contains access tokens
     allow:
@@ -427,7 +431,7 @@ protected_files:
         euid: 501-65533
 
   # Cloudflare Credentials
-  - id: user_cloudflare_credentials
+  - id: cloudflare
     paths:
       - "~/.cloudflare/config.yaml"
       - "~/.wrangler/config/default.toml" # Wrangler (Workers) credentials
@@ -444,7 +448,7 @@ protected_files:
   # ============================================================================
 
   # PyPI upload credentials
-  - id: user_pypi_credentials
+  - id: pypi
     paths:
       - "~/.pypirc"
     allow:
@@ -456,7 +460,7 @@ protected_files:
         euid: 501-65533
 
   # Pip configuration (may contain private repo credentials)
-  - id: user_pip_config
+  - id: pip
     paths:
       - "~/.pip/pip.conf"
       - "~/.config/pip/pip.conf"
@@ -475,7 +479,7 @@ protected_files:
   # ============================================================================
 
   # NPM Tokens
-  - id: user_npm_tokens
+  - id: npm
     paths:
       - "~/.npmrc"
     allow:
@@ -492,7 +496,7 @@ protected_files:
         euid: 501-65533
 
   # Ruby Gems Credentials
-  - id: user_gem_credentials
+  - id: gem
     paths:
       - "~/.gem/credentials"
     allow:
@@ -507,7 +511,7 @@ protected_files:
         euid: 501-65533
 
   # Cargo (Rust) Credentials
-  - id: user_cargo_credentials
+  - id: cargo
     paths:
       - "~/.cargo/credentials"
       - "~/.cargo/credentials.toml"
@@ -521,7 +525,7 @@ protected_files:
         euid: 501-65533
 
   # Git Credentials
-  - id: user_git_credentials
+  - id: git
     paths:
       - "~/.git-credentials"
       - "~/.config/git/credentials"
@@ -537,18 +541,20 @@ protected_files:
   # ============================================================================
 
   # System NPM configuration
-  - id: system_npm_config
+  - id: npm_system
     paths:
       - "/etc/npmrc"
       - "/usr/local/etc/npmrc"
     allow:
       - base: "npm"
-        euid: 0
+        euid: 0-65533  # All users can read global npm config
       - base: "node"
-        euid: 0
+        euid: 0-65533
+      - base: "npx"
+        euid: 0-65533
 
   # System Docker configuration
-  - id: system_docker_config
+  - id: docker_system
     paths:
       - "/etc/docker/config.json"
       - "/etc/docker/daemon.json"
@@ -565,7 +571,7 @@ protected_files:
   # ============================================================================
 
   # PostgreSQL credentials
-  - id: user_postgresql_config
+  - id: postgresql
     paths:
       - "~/.pgpass" # PostgreSQL password file
     allow:
@@ -579,7 +585,7 @@ protected_files:
         euid: 501-65533
 
   # MySQL/MariaDB credentials
-  - id: user_mysql_config
+  - id: mysql
     paths:
       - "~/.my.cnf" # MySQL/MariaDB config with passwords
     allow:
@@ -595,7 +601,7 @@ protected_files:
         euid: 501-65533
 
   # System MySQL/MariaDB configs
-  - id: system_mysql_configs
+  - id: mysql_system
     paths:
       - "/etc/mysql/*.cnf"
       - "/var/lib/mysql/*.cnf"
@@ -606,7 +612,7 @@ protected_files:
         euid: 0-999
 
   # System PostgreSQL configs
-  - id: system_postgresql_configs
+  - id: postgresql_system
     paths:
       - "/etc/postgresql/*.conf"
       - "/var/lib/postgresql/*.conf"
@@ -620,7 +626,7 @@ protected_files:
   # NETWORK AUTHENTICATION
   # ============================================================================
   # .netrc file (FTP/HTTP basic auth, Heroku API tokens)
-  - id: netrc_file
+  - id: netrc
     paths:
       - "~/.netrc"
     allow:
@@ -638,7 +644,7 @@ protected_files:
         euid: 501-65533
 
   # .authinfo file (Emacs/Gnus authentication)
-  - id: authinfo_file
+  - id: authinfo
     paths:
       - "~/.authinfo"
       - "~/.authinfo.gpg"
@@ -654,7 +660,7 @@ protected_files:
   # ============================================================================
   # PASSWORD MANAGERS
   # ============================================================================
-  - id: pass_password_store
+  - id: pass
     paths:
       - "~/.password-store/**/*.gpg"
     allow:
@@ -670,7 +676,7 @@ protected_files:
   # ============================================================================
 
   # HashiCorp Vault Token
-  - id: user_vault_token
+  - id: vault
     paths:
       - "~/.vault-token"
     allow:
@@ -679,7 +685,7 @@ protected_files:
         euid: 501-65533
 
   # Ansible Vault Password File
-  - id: user_ansible_vault_pass
+  - id: ansible_vault
     paths:
       - "~/.vault_pass"
       - "~/.ansible_vault_pass"

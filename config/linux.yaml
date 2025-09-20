@@ -111,7 +111,7 @@ protected_files:
       - base: "powershell"
 
   # DigitalOcean CLI
-  - id: digitalocean_credentials
+  - id: digitalocean
     paths:
       - "~/.config/doctl/config.yaml"
       - "~/.config/doctl/auth.json"
@@ -119,7 +119,7 @@ protected_files:
       - base: "doctl"
 
   # Linode CLI
-  - id: linode_credentials
+  - id: linode
     paths:
       - "~/.config/linode-cli"
       - "~/.linode-cli"
@@ -127,7 +127,7 @@ protected_files:
       - base: "linode-cli"
 
   # Vultr CLI
-  - id: vultr_credentials
+  - id: vultr
     paths:
       - "~/.vultr-cli.yaml"
       - "~/.config/vultr/config.yaml"
@@ -149,7 +149,7 @@ protected_files:
         ppid: 1
 
   # Package Manager Credentials
-  - id: npm_credentials
+  - id: npm
     paths:
       - "~/.npmrc"
     allow:
@@ -161,7 +161,7 @@ protected_files:
   # Python credentials moved to unix.yaml
 
   # Ruby Gems Credentials
-  - id: gem_credentials
+  - id: gem
     paths:
       - "~/.gem/credentials"
       - "~/.bundle/config"
@@ -172,7 +172,7 @@ protected_files:
       - base: "ruby"
 
   # Maven/Java Credentials
-  - id: maven_credentials
+  - id: maven
     paths:
       - "~/.m2/settings.xml"
       - "~/.m2/settings-security.xml"
@@ -183,7 +183,7 @@ protected_files:
       - base: "java"
 
   # Composer (PHP) Credentials
-  - id: composer_credentials
+  - id: composer
     paths:
       - "~/.config/composer/auth.json"
       - "~/.composer/auth.json"
@@ -191,7 +191,7 @@ protected_files:
       - base: "composer"
       - base: "php"
 
-  - id: cargo_credentials
+  - id: cargo
     paths:
       - "~/.cargo/credentials"
     allow:
@@ -199,7 +199,7 @@ protected_files:
       - base: "rustc"
       - base: "rustup"
 
-  - id: docker_credentials
+  - id: docker
     paths:
       - "~/.docker/config.json"
     allow:
@@ -208,7 +208,7 @@ protected_files:
       - base: "docker-credential-*" # All Docker credential helpers
 
   # Podman/Buildah Container Credentials
-  - id: podman_credentials
+  - id: podman
     paths:
       - "~/.config/containers/auth.json"
     allow:
@@ -236,7 +236,7 @@ protected_files:
         ppid: 1
 
   # VMware Workstation/Player Credentials
-  - id: vmware_credentials
+  - id: vmware
     paths:
       - "~/.vmware/preferences" # Contains vCenter credentials
       - "~/.vmware/*/vmware*.vmx" # VM configs may have passwords
@@ -273,7 +273,7 @@ protected_files:
       - base: "vpxd" # vCenter Server daemon
 
   # VMware PowerCLI Credentials
-  - id: powercli_credentials
+  - id: powercli
     paths:
       - "~/.config/VMware/PowerCLI/*"
       - "~/.local/share/VMware/credstore/*"
@@ -282,7 +282,7 @@ protected_files:
       - base: "powershell"
 
   # VMware NSX Credentials
-  - id: nsx_credentials
+  - id: nsx
     paths:
       - "~/.nsx-cli/*"
       - "/etc/vmware/nsx/*.xml"
@@ -293,7 +293,7 @@ protected_files:
       - base: "nsx-proxy"
 
   # VMware vRealize/Tanzu Credentials
-  - id: vrealize_credentials
+  - id: vrealize
     paths:
       - "~/.vra/*" # vRealize Automation
       - "~/.vrli/*" # vRealize Log Insight
@@ -309,7 +309,7 @@ protected_files:
       - base: "tkg" # Tanzu Kubernetes Grid
 
   # Proxmox VE Credentials
-  - id: proxmox_credentials
+  - id: proxmox
     paths:
       - "~/.pveclient" # Proxmox client config
       - "~/.config/proxmox/*"
@@ -329,7 +329,7 @@ protected_files:
       - base: "pmxcfs" # Proxmox cluster filesystem
 
   # Nutanix Credentials
-  - id: nutanix_credentials
+  - id: nutanix
     paths:
       - "~/.nutanix/*"
       - "~/.acli/*" # Acropolis CLI
@@ -353,7 +353,7 @@ protected_files:
       - base: "VBoxHeadless"
 
   # QEMU/KVM/libvirt Credentials
-  - id: libvirt_credentials
+  - id: libvirt
     paths:
       - "~/.config/libvirt/auth.conf" # libvirt authentication
       - "~/.virtinst/*" # virt-install configs
@@ -378,7 +378,7 @@ protected_files:
       - base: "vagrant"
 
   # Xen/XenServer/XCP-ng Credentials
-  - id: xen_credentials
+  - id: xen
     paths:
       - "~/.xenrc" # XenServer CLI config
       - "~/.xcp/*"
@@ -390,7 +390,7 @@ protected_files:
       - base: "xcp-rrdd"
 
   # OpenStack Credentials
-  - id: openstack_credentials
+  - id: openstack
     paths:
       - "~/.config/openstack/clouds.yaml"
       - "~/.config/openstack/clouds-public.yaml"
@@ -531,7 +531,7 @@ protected_files:
       - base: "wg"
       - base: "wg-quick"
 
-  - id: network_manager_connections
+  - id: networkmanager
     paths:
       - "/etc/NetworkManager/system-connections/*"
     allow:
@@ -570,7 +570,7 @@ protected_files:
     allow:
       - base: "dbeaver"
 
-  - id: mysql_workbench_connections
+  - id: mysql_workbench
     paths:
       - "~/.mysql/workbench/connections.xml"
       - "~/.mysql/workbench/server_instances.xml"
@@ -591,7 +591,7 @@ protected_files:
   # Cloud-init data removed - better protected by file permissions
 
   # oVirt/RHEV Credentials
-  - id: ovirt_credentials
+  - id: ovirt
     paths:
       - "~/.ovirtshellrc" # oVirt shell config
       - "~/.config/ovirt-shell/*"
@@ -601,7 +601,7 @@ protected_files:
       - base: "vdsm"
 
   # Hyper-V/Azure Stack HCI (when running on Linux)
-  - id: hyperv_credentials
+  - id: hyperv
     paths:
       - "~/.azure/azureStackHCI/*"
       - "~/.config/azure-stack/*"
@@ -791,7 +791,7 @@ protected_files:
         ppid: 1
 
   # Database Clients
-  - id: dbeaver_connections
+  - id: dbeaver
     paths:
       - "~/.dbeaver/credentials-config.json"
       - "~/.local/share/DBeaverData/workspace*/.dbeaver/credentials-config.json"
@@ -835,7 +835,7 @@ protected_files:
       - base: "wireguard-tools"
 
   # Remmina Remote Desktop Client
-  - id: remmina_connections
+  - id: remmina
     paths:
       - "~/.config/remmina/*.remmina"
       - "~/.local/share/remmina/*.remmina"

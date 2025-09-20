@@ -7,9 +7,9 @@ use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Decision {
-    Allow,        // Protected file, access allowed
-    Deny,         // Protected file, access denied
-    NotProtected, // Not a protected file
+    Allow(Option<String>),        // Protected file, access allowed (with optional rule name)
+    Deny(String),                 // Protected file, access denied (with rule name)
+    NotProtected,                 // Not a protected file
 }
 
 // Cache entry for home directories
@@ -217,7 +217,7 @@ impl RuleEngine {
                 if self.debug {
                     log::debug!("Access allowed by runtime exception");
                 }
-                return Decision::Allow;
+                return Decision::Allow(None);
             }
         }
 
@@ -230,7 +230,7 @@ impl RuleEngine {
                         context.path.display()
                     );
                 }
-                return Decision::Allow;
+                return Decision::Allow(None);
             }
         }
 
@@ -262,14 +262,12 @@ impl RuleEngine {
                                               context.path.display(), i + 1,
                                               protected_file.id.as_deref().unwrap_or("unnamed"));
                                 }
-                                return Decision::Allow;
+                                return Decision::Allow(Some(protected_file.id.clone().unwrap_or_else(|| "unnamed".to_string())));
                             }
                         }
                         // No rules matched - deny access
-                        log::warn!("DENIED: No allow rules matched for process '{}' accessing '{}' (protected by rule '{}')",
-                                  context.path.display(), normalized_path.display(),
-                                  protected_file.id.as_deref().unwrap_or("unnamed"));
-                        return Decision::Deny;
+                        // Log removed - will be handled by monitor.rs with rule name
+                        return Decision::Deny(protected_file.id.clone().unwrap_or_else(|| "unnamed".to_string()));
                     }
                 }
             }
@@ -352,7 +350,7 @@ mod tests {
         // SSH should be allowed to access SSH keys (legitimate binary + protected file)
         // This test is basic - in reality we'd check the actual rules
         match decision {
-            Decision::Allow | Decision::Deny => {
+            Decision::Allow(_) | Decision::Deny(_) => {
                 // Both are valid depending on configuration
             }
         }
@@ -369,11 +367,11 @@ mod tests {
         // Check if this is a protected file first
         if engine.is_protected_file(&ssh_key) {
             let decision = engine.check_access(&malware, &ssh_key, None);
-            assert_eq!(decision, Decision::Deny);
+            assert!(matches!(decision, Decision::Deny(_)));
         } else {
             // If not protected, it would return NotProtected
             let decision = engine.check_access(&malware, &ssh_key, None);
-            assert_eq!(decision, Decision::NotProtected);
+            assert!(matches!(decision, Decision::NotProtected));
         }
     }
 
@@ -388,26 +386,26 @@ mod tests {
         // Should be denied initially if this is a protected file
         if engine.is_protected_file(&ssh_key) {
             let decision = engine.check_access(&custom_tool, &ssh_key, None);
-            assert_eq!(decision, Decision::Deny);
+            assert!(matches!(decision, Decision::Deny(_)));
 
             // Add runtime exception
             engine.add_runtime_exception(custom_tool.clone(), ssh_key.clone());
 
             // Should be allowed now
             let decision = engine.check_access(&custom_tool, &ssh_key, None);
-            assert_eq!(decision, Decision::Allow);
+            assert!(matches!(decision, Decision::Allow(_)));
         } else {
             // If the file isn't protected, test a different scenario
             // Use a hardcoded path we know will be protected
             let protected_file = PathBuf::from(shellexpand::tilde("~/.ssh/id_ed25519").to_string());
             if engine.is_protected_file(&protected_file) {
                 let decision = engine.check_access(&custom_tool, &protected_file, None);
-                assert_eq!(decision, Decision::Deny);
+                assert!(matches!(decision, Decision::Deny(_)));
 
                 engine.add_runtime_exception(custom_tool.clone(), protected_file.clone());
 
                 let decision = engine.check_access(&custom_tool, &protected_file, None);
-                assert_eq!(decision, Decision::Allow);
+                assert!(matches!(decision, Decision::Allow(_)));
             }
         }
     }

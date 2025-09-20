@@ -182,7 +182,7 @@ proc:::exec-success
             .check_access_with_context(&context, &file_path_buf);
 
         match decision {
-            Decision::Allow => {
+            Decision::Allow(_) => {
                 log::info!(
                     "{}[{}/ppid:{}]: open {}: OK (allowed)",
                     process_path.display(),
@@ -194,7 +194,7 @@ proc:::exec-success
             Decision::NotProtected => {
                 // Not a protected file, don't log
             }
-            Decision::Deny => {
+            Decision::Deny(_) => {
                 match self.mode {
                     Mode::Monitor => {
                         log::warn!(

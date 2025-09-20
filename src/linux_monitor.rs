@@ -768,7 +768,7 @@ impl LinuxMonitor {
             .check_access_with_context(&context, &file_path);
 
         match decision {
-            Decision::Allow => {
+            Decision::Allow(_) => {
                 log::info!(
                     "ALLOWED: {} -> {}",
                     process_path.display(),
@@ -780,7 +780,7 @@ impl LinuxMonitor {
                 // Not a protected file, allow silently
                 self.respond_to_event(metadata.fd, FAN_ALLOW)?;
             }
-            Decision::Deny => {
+            Decision::Deny(_) => {
                 // Get detailed process tree for violations (5 levels)
                 let detailed_tree = self.build_process_tree(metadata.pid, 5);
 

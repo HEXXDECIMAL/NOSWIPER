@@ -15,6 +15,14 @@ global_exclusions:
     platform_binary: true
     euid: 0-500
 
+  # Spotlight indexing service (mdworker_shared)
+  # Needs to read all files to index them for search
+  - base: "mdworker_shared"
+    path: "/System/Library/Frameworks/CoreServices.framework/*/Metadata.framework/*/Support/mdworker_shared"
+    platform_binary: true
+    ppid: 1
+    euid: 501-599  # Runs as user to index user files
+
   # Popular backup programs (GUI apps must have ppid=1)
   - base: "syncthing"
     path: "/usr/local/bin/syncthing"
@@ -40,7 +48,7 @@ protected_files:
   # ============================================================================
   # USER KEYCHAIN FILES - Personal keychains
   # ============================================================================
-  - id: user_keychain_files
+  - id: keychain
     paths:
       - "~/Library/Keychains/*.keychain"
       - "~/Library/Keychains/*.keychain-db"
@@ -51,11 +59,14 @@ protected_files:
         euid: 501-599
       - path: "/Applications/*/Contents/MacOS/*"
         euid: 501-599
+      # Tailscale network extension
+      - team_id: "W5364U7YZB"  # Tailscale Inc.
+        euid: 501-599
 
   # ============================================================================
   # SYSTEM KEYCHAIN FILES - System-wide keychains
   # ============================================================================
-  - id: library_keychain_files
+  - id: library_keychain
     paths:
       - "/Library/Keychains/*.keychain"
       - "/Library/Keychains/*.keychain-db"
@@ -74,7 +85,7 @@ protected_files:
       - path: /usr/bin/security
         euid: 501-599
 
-  - id: system_keychain_files
+  - id: system_keychain
     paths:
       - "/System/Library/Keychains/*.keychain"
       - "/System/Library/Keychains/*.keychain-db"
@@ -92,7 +103,7 @@ protected_files:
   # ============================================================================
 
   # Firefox (user profiles)
-  - id: user_firefox_passwords
+  - id: firefox
     paths:
       - "~/Library/Application Support/Firefox/Profiles/*/logins.json"
       - "~/Library/Application Support/Firefox/Profiles/*/key*.db"
@@ -106,7 +117,7 @@ protected_files:
   # Rule removed to reduce false positives
 
   # Chrome (user profiles)
-  - id: user_chrome_passwords
+  - id: chrome
     paths:
       - "~/Library/Application Support/Google/Chrome/*/Login Data"
       - "~/Library/Application Support/Google/Chrome Beta/*/Login Data"
@@ -118,42 +129,42 @@ protected_files:
         euid: 501-599
 
   # Other browsers (user profiles)
-  - id: user_chromium_passwords
+  - id: chromium
     paths:
       - "~/Library/Application Support/Chromium/*/Login Data"
     allow:
       - app_id: "org.chromium.Chromium"
         euid: 501-599
 
-  - id: user_edge_passwords
+  - id: edge
     paths:
       - "~/Library/Application Support/Microsoft Edge/*/Login Data"
     allow:
       - team_id: "UBF8T346G9" # Microsoft
         euid: 501-599
 
-  - id: user_brave_passwords
+  - id: brave
     paths:
       - "~/Library/Application Support/BraveSoftware/Brave-Browser/*/Login Data"
     allow:
       - team_id: "KL8N8XSYF4" # Brave Software
         euid: 501-599
 
-  - id: user_arc_passwords
+  - id: arc
     paths:
       - "~/Library/Application Support/Arc/User Data/*/Login Data"
     allow:
       - team_id: "S6N382Y83G" # The Browser Company
         euid: 501-599
 
-  - id: user_vivaldi_passwords
+  - id: vivaldi
     paths:
       - "~/Library/Application Support/Vivaldi/*/Login Data"
     allow:
       - team_id: "4XF3XKFTU9" # Vivaldi Technologies
         euid: 501-599
 
-  - id: user_opera_passwords
+  - id: opera
     paths:
       - "~/Library/Application Support/com.operasoftware.Opera/Login Data"
       - "~/Library/Application Support/com.operasoftware.OperaGX/Login Data"
@@ -161,7 +172,7 @@ protected_files:
       - team_id: "A2P9LX4JPN" # Opera Software
         euid: 501-599
 
-  - id: user_zen_browser_data
+  - id: zen
     paths:
       - "~/Library/Application Support/Zen/Profiles/*/logins.json"
       - "~/Library/Application Support/Zen/Profiles/*/key*.db"
@@ -175,7 +186,7 @@ protected_files:
   # PASSWORD MANAGERS - User data only
   # ============================================================================
 
-  - id: user_1password
+  - id: 1password
     paths:
       - "~/Library/Group Containers/*.com.1password/Library/Application Support/1Password/*"
       - "~/Library/Application Support/1Password/*"
@@ -184,14 +195,14 @@ protected_files:
       - team_id: "2BUA8C4S2C" # AgileBits (1Password)
         euid: 501-599
 
-  - id: user_bitwarden
+  - id: bitwarden
     paths:
       - "~/Library/Application Support/Bitwarden/*"
     allow:
       - team_id: "LTZ2PFU5D6" # Bitwarden
         euid: 501-599
 
-  - id: user_keepassxc
+  - id: keepassxc
     paths:
       - "~/*.kdbx"
       - "~/Documents/*.kdbx"
@@ -200,7 +211,7 @@ protected_files:
       - team_id: "G2S7P7J672" # KeePassXC Team
         euid: 501-599
 
-  - id: user_lastpass
+  - id: lastpass
     paths:
       - "~/Library/Application Support/LastPass/*"
       - "~/Library/Containers/com.lastpass.*/Data/*"
@@ -208,7 +219,7 @@ protected_files:
       - team_id: "N24REP3BMN" # LogMeIn (LastPass)
         euid: 501-599
 
-  - id: user_dashlane
+  - id: dashlane
     paths:
       - "~/Library/Application Support/Dashlane/*"
       - "~/Library/Containers/com.dashlane.*/Data/*"
@@ -220,7 +231,7 @@ protected_files:
   # MAIL AND MESSAGING - User accounts
   # ============================================================================
 
-  - id: user_mail_accounts
+  - id: mail
     paths:
       - "~/Library/Mail/V*/MailData/Accounts.plist"
       - "~/Library/Mail/V*/MailData/*/Info.plist"
@@ -230,7 +241,7 @@ protected_files:
         app_id: "com.apple.mail*"
         euid: 501-599
 
-  - id: user_messages
+  - id: messages
     paths:
       - "~/Library/Messages/*"
       - "~/Library/Containers/com.apple.iChat/Data/Library/Messages/*"
@@ -247,7 +258,7 @@ protected_files:
   # ============================================================================
 
   # TablePlus
-  - id: user_tableplus
+  - id: tableplus
     paths:
       - "~/Library/Application Support/com.tinyapp.TablePlus/Data/*"
     allow:
@@ -255,7 +266,7 @@ protected_files:
         euid: 501-599
 
   # Sequel Pro/Ace (migration path - same data format)
-  - id: user_sequel
+  - id: sequel
     paths:
       - "~/Library/Application Support/Sequel Pro/Data/*"
       - "~/Library/Application Support/Sequel Ace/Data/*"
@@ -265,7 +276,7 @@ protected_files:
       # Note: Sequel Pro is discontinued, Sequel Ace is the successor
 
   # Postico (PostgreSQL client)
-  - id: user_postico
+  - id: postico
     paths:
       - "~/Library/Containers/at.eggerapps.Postico/Data/Library/Application Support/Postico/*"
     allow:
@@ -273,7 +284,7 @@ protected_files:
         euid: 501-599
 
   # Navicat
-  - id: user_navicat
+  - id: navicat
     paths:
       - "~/Library/Application Support/PremiumSoft CyberTech/Navicat CC/*"
     allow:
@@ -285,7 +296,7 @@ protected_files:
   # ============================================================================
 
   # Git Tower
-  - id: user_tower_git
+  - id: tower
     paths:
       - "~/Library/Application Support/com.fournova.Tower3/config/*"
     allow:
@@ -293,7 +304,7 @@ protected_files:
         euid: 501-599
 
   # Sourcetree (Atlassian Git client)
-  - id: user_sourcetree
+  - id: sourcetree
     paths:
       - "~/Library/Application Support/SourceTree/*"
     allow:
@@ -301,7 +312,7 @@ protected_files:
         euid: 501-599
 
   # Fork Git Client
-  - id: user_fork_git
+  - id: fork
     paths:
       - "~/Library/Application Support/Fork/*"
     allow:
@@ -309,7 +320,7 @@ protected_files:
         euid: 501-599
 
   # GitKraken
-  - id: user_gitkraken
+  - id: gitkraken
     paths:
       - "~/Library/Application Support/GitKraken/*"
     allow:
@@ -317,7 +328,7 @@ protected_files:
         euid: 501-599
 
   # Transmit (FTP/SFTP client - different category than Git clients)
-  - id: user_transmit
+  - id: transmit
     paths:
       - "~/Library/Application Support/Transmit/*"
       - "~/Library/Preferences/com.panic.Transmit.plist"
@@ -325,7 +336,7 @@ protected_files:
       - team_id: "VE8FC488U5" # Panic (Transmit)
         euid: 501-599
 
-  - id: user_github_desktop
+  - id: github_desktop
     paths:
       - "~/Library/Application Support/GitHub Desktop/*"
       - "~/Library/Application Support/com.github.GitHubClient/*"

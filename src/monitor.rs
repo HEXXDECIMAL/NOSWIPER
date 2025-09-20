@@ -724,20 +724,23 @@ impl Monitor {
             .check_access_with_context(&context, &real_protected_path);
 
         match decision {
-            Decision::Allow => {
-                // This is a protected file that was allowed access
-                if self.verbose {
-                    let log_msg = self.build_compact_log_message(
-                        "OK",
-                        &real_protected_path,
-                        "exec",
-                        pid,
-                        ppid,
-                        euid,
-                        &real_process_path,
-                    );
-                    log::info!("{}", log_msg);
-                }
+            Decision::Allow(rule_name) => {
+                // This is a protected file that was allowed access - log it
+                let prefix = if let Some(ref name) = rule_name {
+                    format!("OK[{}]", name)
+                } else {
+                    "OK".to_string()
+                };
+                let log_msg = self.build_compact_log_message(
+                    &prefix,
+                    &real_protected_path,
+                    "exec",
+                    pid,
+                    ppid,
+                    euid,
+                    &real_process_path,
+                );
+                log::info!("{}", log_msg);
             }
             Decision::NotProtected => {
                 // Not a protected file, don't log unless debugging
@@ -745,11 +748,11 @@ impl Monitor {
                     log::trace!("File '{}' is not protected", real_protected_path.display());
                 }
             }
-            Decision::Deny => {
+            Decision::Deny(rule_name) => {
                 match self.mode {
                     Mode::Monitor => {
                         let log_msg = self.build_compact_log_message(
-                            "DETECTED",
+                            &format!("DETECTED[{}]", rule_name),
                             &real_protected_path,
                             "exec",
                             pid,
@@ -1008,20 +1011,23 @@ impl Monitor {
             .check_access_with_context(&context, &real_file_path);
 
         match decision {
-            Decision::Allow => {
-                // This is a protected file that was allowed access
-                if self.verbose {
-                    let log_msg = self.build_compact_log_message(
-                        "OK",
-                        &real_file_path,
-                        "open",
-                        pid,
-                        ppid,
-                        euid,
-                        &real_process_path,
-                    );
-                    log::info!("{}", log_msg);
-                }
+            Decision::Allow(rule_name) => {
+                // This is a protected file that was allowed access - log it
+                let prefix = if let Some(ref name) = rule_name {
+                    format!("OK[{}]", name)
+                } else {
+                    "OK".to_string()
+                };
+                let log_msg = self.build_compact_log_message(
+                    &prefix,
+                    &real_file_path,
+                    "open",
+                    pid,
+                    ppid,
+                    euid,
+                    &real_process_path,
+                );
+                log::info!("{}", log_msg);
             }
             Decision::NotProtected => {
                 // Not a protected file, don't log unless debugging
@@ -1029,11 +1035,11 @@ impl Monitor {
                     log::trace!("File '{}' is not protected", real_file_path.display());
                 }
             }
-            Decision::Deny => {
+            Decision::Deny(rule_name) => {
                 match self.mode {
                     Mode::Monitor => {
                         let log_msg = self.build_compact_log_message(
-                            "DETECTED",
+                            &format!("DETECTED[{}]", rule_name),
                             &real_file_path,
                             "open",
                             pid,
@@ -1427,10 +1433,18 @@ impl Monitor {
 
         // Get team ID for the process
         let process_entry = pid.and_then(|p| self.process_cache.get(&p));
-        let team_id = process_entry.and_then(|e| e.team_id.as_deref()).unwrap_or("?");
+
+        // Build team ID part - if platform binary with no team ID, use "Apple"
+        let team_id_str = if let Some(tid) = process_entry.and_then(|e| e.team_id.as_deref()) {
+            format!("{}:", tid)
+        } else if process_entry.map(|e| e.is_platform_binary).unwrap_or(false) {
+            "Apple:".to_string()
+        } else {
+            String::new() // Omit team ID if not available and not platform binary
+        };
 
         // Get parent info
-        let (parent_info, grandparent_info) = if let Some(pp) = ppid {
+        let parent_info = if let Some(pp) = ppid {
             if pp > 0 {
                 let parent_entry = self.process_cache.get(&pp);
                 let parent_cmd = self.get_process_cmdline(pp);
@@ -1438,67 +1452,31 @@ impl Monitor {
                     .and_then(|e| e.path.file_name())
                     .and_then(|n| n.to_str())
                     .unwrap_or("unknown");
-                let parent_euid = parent_entry.and_then(|e| e.euid).unwrap_or(0);
-                let parent_team_id = parent_entry.and_then(|e| e.team_id.as_deref()).unwrap_or("?");
-                let parent_ppid = parent_entry.and_then(|e| e.ppid);
 
-                let parent_str = if let Some(cmd) = parent_cmd {
-                    format!(" -> {} <{}> [{}@{}]", cmd, parent_team_id, pp, parent_euid)
+                if let Some(cmd) = parent_cmd {
+                    format!("→{}", cmd)
                 } else {
-                    format!(" -> {} <{}> [{}@{}]", parent_name, parent_team_id, pp, parent_euid)
-                };
-
-                // Get grandparent info (always included)
-                let grandparent_str = if let Some(gp) = parent_ppid {
-                    if gp > 0 {
-                        let gp_entry = self.process_cache.get(&gp);
-                        let gp_cmd = self.get_process_cmdline(gp);
-                        let gp_name = gp_entry
-                            .and_then(|e| e.path.file_name())
-                            .and_then(|n| n.to_str())
-                            .unwrap_or("unknown");
-                        let gp_euid = gp_entry.and_then(|e| e.euid).unwrap_or(0);
-                        let gp_team_id = if let Some(tid) = gp_entry.and_then(|e| e.team_id.as_deref()) {
-                            tid
-                        } else if gp_entry.map(|e| e.is_platform_binary).unwrap_or(false) {
-                            "Apple"
-                        } else {
-                            "Self"
-                        };
-
-                        if let Some(cmd) = gp_cmd {
-                            format!(" -> {} <{}> [{}@{}]", cmd, gp_team_id, gp, gp_euid)
-                        } else {
-                            format!(" -> {} <{}> [{}@{}]", gp_name, gp_team_id, gp, gp_euid)
-                        }
-                    } else {
-                        String::new()
-                    }
-                } else {
-                    String::new()
-                };
-
-                (parent_str, grandparent_str)
+                    format!("→{}", parent_name)
+                }
             } else {
-                (String::new(), String::new())
+                String::new()
             }
         } else {
-            (String::new(), String::new())
+            String::new()
         };
 
         // Build the compact log format:
-        // DECISION: /path/to/file event_type: process args <team_id> [pid@uid] -> parent [-> grandparent]
+        // DECISION: /path/to/file event_type: process args [teamid:pid@uid]→parent
         format!(
-            "{}: {} {}: {} <{}> [{}@{}]{}{}",
+            "{}: {} {}: {} [{}{}@{}]{}",
             decision,
             file_path.display(),
             event_type,
             cmdline.as_deref().unwrap_or(process_name),
-            team_id,
+            team_id_str,
             pid.unwrap_or(0),
             euid.unwrap_or(0),
-            parent_info,
-            grandparent_info
+            parent_info
         )
     }
 
