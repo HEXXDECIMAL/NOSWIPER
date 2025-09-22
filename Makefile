@@ -1,10 +1,11 @@
 # NoSwiper Makefile
-# Simple build and run commands
+# Build and run commands for both agent and UI
 
-BINARY_NAME = noswiper-agent
+AGENT_BINARY = noswiper-agent
+UI_BINARY = noswiper-ui
 OUT_DIR = out
 
-.PHONY: all build release clean monitor enforce test lint help
+.PHONY: all build build-agent build-ui release release-agent release-ui clean monitor enforce test lint help run-ui
 
 # Default target
 all: build
@@ -14,38 +15,58 @@ help: ## Show this help
 	@echo "Usage: make [target]"
 	@echo ""
 	@echo "Targets:"
-	@echo "  build     - Build debug binary"
-	@echo "  release   - Build release binary"
-	@echo "  monitor   - Build and run in monitor mode (requires sudo)"
-	@echo "  enforce   - Build and run in enforce mode (requires sudo)"
-	@echo "  test      - Run tests"
-	@echo "  lint      - Run linters"
-	@echo "  clean     - Clean build artifacts"
+	@echo "  build       - Build both agent and UI (debug)"
+	@echo "  build-agent - Build agent only (debug)"
+	@echo "  build-ui    - Build UI only (debug)"
+	@echo "  release     - Build both agent and UI (release)"
+	@echo "  release-agent - Build agent only (release)"
+	@echo "  release-ui  - Build UI only (release)"
+	@echo "  monitor     - Build and run agent in monitor mode (requires sudo)"
+	@echo "  enforce     - Build and run agent in enforce mode (requires sudo)"
+	@echo "  run-ui      - Run the UI application"
+	@echo "  test        - Run tests for both projects"
+	@echo "  lint        - Run linters for both projects"
+	@echo "  clean       - Clean all build artifacts"
 
-build: ## Build debug binary
-	cargo build
+build: build-agent build-ui ## Build both agent and UI (debug)
 
-release: $(OUT_DIR) ## Build release binary
-	cargo build --release
-	cp target/release/$(BINARY_NAME) $(OUT_DIR)/
-	@echo "Release binary: $(OUT_DIR)/$(BINARY_NAME)"
+build-agent: ## Build agent only (debug)
+	cargo build -p noswiper
 
-monitor: build ## Build and run in monitor mode
-	@echo "Starting in monitor mode (requires sudo)..."
-	sudo target/debug/$(BINARY_NAME) --monitor
+build-ui: ## Build UI only (debug)
+	cargo build -p noswiper-ui
 
-enforce: build ## Build and run in enforce mode
-	@echo "Starting in enforce mode (requires sudo)..."
-	sudo target/debug/$(BINARY_NAME) --enforce
+release: release-agent release-ui ## Build both agent and UI (release)
 
-test: ## Run tests
-	cargo test
+release-agent: $(OUT_DIR) ## Build agent only (release)
+	cargo build --release -p noswiper
+	cp target/release/$(AGENT_BINARY) $(OUT_DIR)/
+	@echo "Agent release binary: $(OUT_DIR)/$(AGENT_BINARY)"
 
-lint: ## Run linters
-	cargo fmt --check
-	cargo clippy -- -D warnings
+release-ui: $(OUT_DIR) ## Build UI only (release)
+	cargo build --release -p noswiper-ui
+	cp target/release/$(UI_BINARY) $(OUT_DIR)/
+	@echo "UI release binary: $(OUT_DIR)/$(UI_BINARY)"
 
-clean: ## Clean build artifacts
+monitor: build-agent ## Build and run agent in monitor mode
+	@echo "Starting agent in monitor mode (requires sudo)..."
+	sudo ./target/debug/$(AGENT_BINARY) --monitor
+
+enforce: build-agent ## Build and run agent in enforce mode
+	@echo "Starting agent in enforce mode (requires sudo)..."
+	sudo ./target/debug/$(AGENT_BINARY)
+
+run-ui: build-ui ## Run the UI application
+	@echo "Starting UI..."
+	./target/debug/$(UI_BINARY)
+
+test: ## Run tests for both projects
+	cargo test --workspace
+
+lint: ## Run linters for both projects
+	cargo fmt --all --check && cargo clippy --workspace -- -D warnings
+
+clean: ## Clean all build artifacts
 	cargo clean
 	rm -rf $(OUT_DIR)
 
