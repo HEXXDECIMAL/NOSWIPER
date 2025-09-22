@@ -6,7 +6,6 @@ use crate::json_logger::{JsonLogger, ProcessDetails};
 use crate::rules::Decision;
 use crate::rules::RuleEngine;
 use anyhow::Result;
-use std::sync::Arc;
 #[cfg(target_os = "macos")]
 use serde::Deserialize;
 #[cfg(target_os = "macos")]
@@ -16,6 +15,7 @@ use std::path::Path;
 use std::path::PathBuf;
 #[cfg(target_os = "macos")]
 use std::process::Command;
+use std::sync::Arc;
 #[cfg(target_os = "macos")]
 use std::time::{Duration, Instant};
 #[cfg(target_os = "macos")]
@@ -115,7 +115,13 @@ struct EsloggerEvent {
 }
 
 impl Monitor {
-    pub fn new(mode: Mode, mechanism: Mechanism, verbose: bool, debug: bool, stop_parent: bool) -> Self {
+    pub fn new(
+        mode: Mode,
+        mechanism: Mechanism,
+        verbose: bool,
+        debug: bool,
+        stop_parent: bool,
+    ) -> Self {
         // Load config from embedded YAML
         let config = Config::default().expect("Failed to load default config");
 
@@ -256,8 +262,11 @@ impl Monitor {
         tokio::spawn(async move {
             tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
             let count = event_count_clone.load(std::sync::atomic::Ordering::Relaxed);
-            log::info!("Processed {} events in first 5 seconds (averaging {:.1} events/sec)",
-                      count, count as f64 / 5.0);
+            log::info!(
+                "Processed {} events in first 5 seconds (averaging {:.1} events/sec)",
+                count,
+                count as f64 / 5.0
+            );
         });
 
         while let Some(line) = lines.next_line().await? {
@@ -268,7 +277,8 @@ impl Monitor {
             event_count += 1;
 
             // Update shared counter for first 5 seconds
-            if event_count <= 10000 { // Reasonable cap to avoid overflow
+            if event_count <= 10000 {
+                // Reasonable cap to avoid overflow
                 event_count_shared.store(event_count, std::sync::atomic::Ordering::Relaxed);
             }
 
@@ -730,7 +740,8 @@ impl Monitor {
         use crate::process_context::ProcessContext;
 
         // Get platform_binary from cache if available
-        let platform_binary = pid.and_then(|p| self.process_cache.get(&p))
+        let platform_binary = pid
+            .and_then(|p| self.process_cache.get(&p))
             .map(|entry| entry.is_platform_binary);
 
         let context = ProcessContext {
@@ -830,7 +841,8 @@ impl Monitor {
 
                             if stopped {
                                 // Log the blocked event with process tree
-                                log::error!("BLOCKED: {} {}: {}",
+                                log::error!(
+                                    "BLOCKED: {} {}: {}",
                                     real_protected_path.display(),
                                     "exec",
                                     real_process_path.display()
@@ -885,7 +897,8 @@ impl Monitor {
                                 };
 
                                 // Log the blocked event with process tree
-                                log::error!("BLOCKED: {} {}: {}",
+                                log::error!(
+                                    "BLOCKED: {} {}: {}",
                                     real_protected_path.display(),
                                     "exec",
                                     real_process_path.display()
@@ -900,7 +913,9 @@ impl Monitor {
                                 if parent_stopped {
                                     log::error!("  Status: Process exited, parent stopped");
                                 } else {
-                                    log::error!("  Status: Process exited before it could be stopped");
+                                    log::error!(
+                                        "  Status: Process exited before it could be stopped"
+                                    );
                                 }
                             }
                         }
@@ -1019,7 +1034,8 @@ impl Monitor {
         use crate::process_context::ProcessContext;
 
         // Get platform_binary from cache if available
-        let platform_binary = pid.and_then(|p| self.process_cache.get(&p))
+        let platform_binary = pid
+            .and_then(|p| self.process_cache.get(&p))
             .map(|entry| entry.is_platform_binary);
 
         let context = ProcessContext {
@@ -1084,16 +1100,18 @@ impl Monitor {
                         }
                     };
 
-                    let parent = ppid.and_then(|pp| self.process_cache.get(&pp).map(|cached| ProcessDetails {
-                        pid: pp,
-                        ppid: cached.ppid,
-                        euid: cached.euid,
-                        path: cached.path.display().to_string(),
-                        command_line: Some(cached.command_line.clone()),
-                        team_id: cached.team_id.clone(),
-                        signing_id: cached.signing_id.clone(),
-                        is_platform_binary: Some(cached.is_platform_binary),
-                    }));
+                    let parent = ppid.and_then(|pp| {
+                        self.process_cache.get(&pp).map(|cached| ProcessDetails {
+                            pid: pp,
+                            ppid: cached.ppid,
+                            euid: cached.euid,
+                            path: cached.path.display().to_string(),
+                            command_line: Some(cached.command_line.clone()),
+                            team_id: cached.team_id.clone(),
+                            signing_id: cached.signing_id.clone(),
+                            is_platform_binary: Some(cached.is_platform_binary),
+                        })
+                    });
 
                     let event = JsonLogger::build_allow_event(
                         rule_name.clone(),
@@ -1203,7 +1221,10 @@ impl Monitor {
                         let ipc_server = Arc::clone(&self.ipc_server);
                         let event_id_clone = event_id.clone();
                         tokio::spawn(async move {
-                            if let Err(e) = ipc_server.register_suspended_process(event_id_clone, suspended).await {
+                            if let Err(e) = ipc_server
+                                .register_suspended_process(event_id_clone, suspended)
+                                .await
+                            {
                                 log::debug!("Failed to register suspended process: {}", e);
                             }
                         });
@@ -1267,7 +1288,8 @@ impl Monitor {
 
                             if stopped {
                                 // Log the blocked event with process tree
-                                log::error!("BLOCKED: {} {}: {}",
+                                log::error!(
+                                    "BLOCKED: {} {}: {}",
                                     real_file_path.display(),
                                     "open",
                                     real_process_path.display()
@@ -1323,7 +1345,8 @@ impl Monitor {
                                 };
 
                                 // Log the blocked event with process tree
-                                log::error!("BLOCKED: {} {}: {}",
+                                log::error!(
+                                    "BLOCKED: {} {}: {}",
                                     real_file_path.display(),
                                     "open",
                                     real_process_path.display()
@@ -1338,12 +1361,15 @@ impl Monitor {
                                 if parent_stopped {
                                     log::error!("  Status: Process exited, parent stopped");
                                 } else {
-                                    log::error!("  Status: Process exited before it could be stopped");
+                                    log::error!(
+                                        "  Status: Process exited before it could be stopped"
+                                    );
                                 }
                             }
                         } else {
                             // No PID available
-                            log::error!("BLOCKED: {} {}: {} (no PID available)",
+                            log::error!(
+                                "BLOCKED: {} {}: {} (no PID available)",
                                 real_file_path.display(),
                                 "open",
                                 real_process_path.display()
@@ -1724,13 +1750,18 @@ impl Monitor {
         // Get team ID for the process
         let process_entry = pid.and_then(|p| self.process_cache.get(&p));
 
-        // Build team ID part - if platform binary with no team ID, use "Apple"
+        // Build team ID part - prefix with * if platform binary
+        let is_platform = process_entry.map(|e| e.is_platform_binary).unwrap_or(false);
         let team_id_str = if let Some(tid) = process_entry.and_then(|e| e.team_id.as_deref()) {
-            format!("{}:", tid)
-        } else if process_entry.map(|e| e.is_platform_binary).unwrap_or(false) {
-            "Apple:".to_string()
+            if is_platform {
+                format!("*{}:", tid) // Platform binary with team ID
+            } else {
+                format!("{}:", tid) // Regular signed binary
+            }
+        } else if is_platform {
+            "*Apple:".to_string() // Platform binary without explicit team ID
         } else {
-            String::new() // Omit team ID if not available and not platform binary
+            String::new() // Unsigned binary
         };
 
         // Get parent info

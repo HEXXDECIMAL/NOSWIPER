@@ -87,6 +87,12 @@ protected_files:
       # Google Chrome variants accessing system root certificates
       - team_id: "EQHXZ8M8AV" # Google
         euid: 501-599
+      - path: "/Applications/*/Contents/MacOS/*"
+        euid: 501-599
+        ppid: 1
+      # Tailscale network extension
+      - team_id: "W5364U7YZB" # Tailscale Inc.
+        euid: 501-599
 
   # ============================================================================
   # BROWSER PASSWORD STORES - User data only
