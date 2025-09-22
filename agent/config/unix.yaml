@@ -1,0 +1,724 @@
+# Common UNIX configuration shared across all UNIX-like systems
+# This file is loaded alongside OS-specific configurations
+
+# Common global exclusions across Unix systems
+global_exclusions: []
+
+# Empty default base paths (OS-specific config will provide actual paths)
+default_base_paths: []
+
+# Common protected files across UNIX systems
+protected_files:
+  # ============================================================================
+  # USER SSH KEYS - Personal credentials
+  # ============================================================================
+  - id: ssh
+    paths:
+      - "~/.ssh/id_*"
+      - "~/.ssh/*_key"
+    allow:
+      # User processes only (EUID 501-65533 covers macOS and Linux users)
+      - base: "ssh"
+        euid: 501-65533
+      - base: "ssh-add"
+        euid: 501-65533
+      - base: "ssh-agent"
+        euid: 501-65533
+      - base: "ssh-keygen"
+        euid: 501-65533
+      - base: "scp"
+        euid: 501-65533
+      - base: "sftp"
+        euid: 501-65533
+      - base: "rsync"
+        euid: 501-65533
+      - base: "git"
+        euid: 501-65533
+      # Mobile shell (SSH replacement)
+      - base: "mosh"
+        euid: 501-65533
+      - base: "mosh-client"
+        euid: 501-65533
+
+  # ============================================================================
+  # SYSTEM SSH HOST KEYS - System-wide server keys
+  # ============================================================================
+  - id: ssh_host
+    paths:
+      - "/etc/ssh/ssh_host_*_key"
+      - "/etc/ssh_host_*_key" # Some systems put them here
+    allow:
+      # Only root/system processes should access host keys
+      - base: "sshd"
+        euid: 0 # Must be root
+      - base: "ssh-keygen"
+        euid: 0 # Root generating host keys
+      - base: "systemd"
+        euid: 0 # SystemD managing sshd
+      - base: "launchd"
+        euid: 0 # macOS launchd managing sshd
+
+  # ============================================================================
+  # ROOT SSH KEYS - Root user's personal SSH keys
+  # ============================================================================
+  - id: root_ssh
+    paths:
+      - "/root/.ssh/id_*"
+      - "/root/.ssh/*_key"
+      - "!/root/.ssh/*_key.pub"
+      - "/var/root/.ssh/id_*" # macOS root home
+      - "/var/root/.ssh/*_key"
+    allow:
+      # Only root processes
+      - base: "ssh"
+        euid: 0
+      - base: "scp"
+        euid: 0
+      - base: "sftp"
+        euid: 0
+      - base: "rsync"
+        euid: 0
+
+  # ============================================================================
+  # USER GPG KEYS - Personal encryption keys
+  # ============================================================================
+  - id: gpg
+    paths:
+      - "~/.gnupg/private-keys-v1.d/*"
+      - "~/.gnupg/secring.gpg"
+      - "~/.gnupg/trustdb.gpg"
+    allow:
+      # User processes only
+      - base: "gpg"
+        euid: 501-65533
+      - base: "gpg2"
+        euid: 501-65533
+      - base: "gnupg"
+        euid: 501-65533
+      - base: "gpg-agent"
+        euid: 501-65533
+      - base: "pinentry*"
+        euid: 501-65533
+      - base: "pass" # Password manager using GPG
+        euid: 501-65533
+      - base: "git" # Git commit signing
+        euid: 501-65533
+
+  # ============================================================================
+  # SHELL HISTORY FILES - Contain commands with passwords and secrets
+  # ============================================================================
+  # Strategy: Allow shells to always access their OWN history
+  # Allow other tools only with -l flag (login shell)
+
+  # Bash history
+  - id: bash_history
+    paths:
+      - "~/.bash_history"
+      - "/home/*/.bash_history"
+      - "/Users/*/.bash_history"
+      - "/root/.bash_history"
+      - "/var/root/.bash_history"
+    allow:
+      - base: "bash"
+        euid: 501-65533
+      - base: "mcfly"
+        euid: 501-65533
+      - base: "atuin"
+        euid: 501-65533
+      - base: "fzf"
+        euid: 501-65533
+      - base: "tail"  # For reading last commands
+        euid: 501-65533
+      - base: "head"
+        euid: 501-65533
+      - base: "cat"
+        euid: 501-65533
+
+  # Zsh history
+  - id: zsh_history
+    paths:
+      - "~/.zsh_history"
+      - "~/.zhistory"
+      - "~/.histfile"
+    allow:
+      - base: "zsh"
+        arg: "-l"
+      - base: "zsh"
+        arg: "-i"
+      - base: "mcfly"
+        euid: 501-65533
+      - base: "atuin"
+        euid: 501-65533
+      - base: "fzf"
+        euid: 501-65533
+
+  # Fish history
+  - id: fish_history
+    paths:
+      - "~/.fish_history"
+      - "~/.local/share/fish/fish_history"
+    allow:
+      # Fish can always access fish history
+      - base: "fish"
+      - base: "mcfly"
+        euid: 501-65533
+      - base: "atuin"
+        euid: 501-65533
+      - base: "fzf"
+        euid: 501-65533
+
+  # Generic/POSIX sh history
+  - id: sh_history
+    paths:
+      - "~/.sh_history"
+    allow:
+      # sh/dash can always access sh history
+      - base: "sh"
+      - base: "dash"
+      - base: "ash"
+      - base: "ksh"
+
+  # C shell history
+  - id: csh_history
+    paths:
+      - "~/.history"
+    allow:
+      # csh/tcsh can always access their history
+      - base: "csh"
+      - base: "tcsh"
+
+  # ============================================================================
+  # CLOUD CREDENTIALS - User accounts only
+  # ============================================================================
+
+  # AWS Credentials (actual secrets only, not config)
+  - id: aws
+    paths:
+      - "~/.aws/credentials" # Contains access keys and secrets
+      # NOT including ~/.aws/config which only has region/profile settings
+    allow:
+      # User processes only
+      - base: "aws"
+        euid: 501-65533
+      - base: "aws-vault"
+        euid: 501-65533
+      - base: "terraform"
+        euid: 501-65533
+      - base: "packer"
+        euid: 501-65533
+      - base: "ansible*"
+        euid: 501-65533
+      # AWS CLI v2 is implemented in Python
+      # macOS Command Line Tools Python (capital P)
+      - base: "Python"
+        path: "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/*/Resources/Python.app/Contents/MacOS/Python"
+        euid: 501-65533
+      # Standard python (lowercase) from anywhere (for boto3/boto)
+      - base: "python*"
+        euid: 501-65533
+      # AWS SAM CLI
+      - base: "sam"
+        euid: 501-65533
+      # AWS CDK
+      - base: "cdk"
+        euid: 501-65533
+      # Serverless Framework
+      - base: "serverless"
+        euid: 501-65533
+      - base: "sls"  # serverless shorthand
+        euid: 501-65533
+      # Node.js (for AWS SDK)
+      - base: "node"
+        euid: 501-65533
+      # Go binaries that use AWS SDK
+      - base: "eksctl"
+        euid: 501-65533
+      # Docker (for ECR authentication)
+      - base: "docker"
+        euid: 501-65533
+      - base: "docker-credential-*"
+        euid: 501-65533
+      # Pulumi
+      - base: "pulumi"
+        euid: 501-65533
+
+  # AWS Session tokens (temporary credentials)
+  - id: aws_session
+    paths:
+      - "~/.aws/cli/cache/*.json" # Session tokens from SSO/assume-role
+    allow:
+      - base: "aws"
+        euid: 501-65533
+      - base: "aws-vault"
+        euid: 501-65533
+
+  # Google Cloud Application Default Credentials
+  # These can be used by ANY application using GCP client libraries
+  - id: gcp_adc
+    paths:
+      - "~/.config/gcloud/application_default_credentials.json"
+      - "~/.config/gcloud/legacy_credentials/*/adc.json"
+    allow:
+      # Any user process can potentially use ADC
+      - euid: 501-65533
+        # Note: We can't restrict by binary name since any app using
+        # GCP client libraries will access these
+
+  # Google Cloud CLI-specific credentials
+  # These are only used by gcloud CLI and related tools
+  - id: gcloud
+    paths:
+      - "~/.config/gcloud/access_tokens.db"
+      - "~/.config/gcloud/credentials.db"
+    allow:
+      - base: "gcloud"
+        euid: 501-65533
+      - base: "gsutil"
+        euid: 501-65533
+      - base: "bq"
+        euid: 501-65533
+      - base: "docker-credential-gcloud"
+        euid: 501-65533
+      # gcloud is implemented in Python, so Python needs access
+      # macOS Command Line Tools Python (capital P)
+      - base: "Python"
+        path: "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/*/Resources/Python.app/Contents/MacOS/Python"
+        euid: 501-65533
+      # Standard python (lowercase) from anywhere
+      - base: "python*"
+        euid: 501-65533
+
+  # Google Cloud Service Account Keys
+  # These JSON files can be stored anywhere and used by any app
+  - id: gcp_sa
+    paths:
+      - "~/*-key.json" # Common pattern for service account keys
+      - "~/Downloads/*-key.json" # Often downloaded here
+      - "~/.config/*-key.json" # Sometimes stored in config dirs
+      - "~/projects/**/service-account*.json"
+      - "~/projects/**/*-sa.json"
+    allow:
+      # Any user process might use service account keys
+      - euid: 501-65533
+        # Note: Hard to restrict by binary since any app can use these
+
+  # Azure Credentials (actual secrets only)
+  - id: azure
+    paths:
+      # Access tokens and refresh tokens
+      - "~/.azure/accessTokens.json"
+      - "~/.azure/msal_token_cache.json"
+      # Service principal credentials
+      - "~/.azure/servicePrincipals.json"
+      # Azure DevOps tokens
+      - "~/.azure/azuredevops/personalAccessTokens.json"
+      # NOT including ~/.azure/config or profiles
+    allow:
+      # User processes only
+      - base: "az"
+        euid: 501-65533
+      - base: "terraform"
+        euid: 501-65533
+      - base: "pwsh" # PowerShell Core
+        euid: 501-65533
+      - base: "dotnet"
+        euid: 501-65533
+      # Azure CLI is implemented in Python
+      # macOS Command Line Tools Python (capital P)
+      - base: "Python"
+        path: "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/*/Resources/Python.app/Contents/MacOS/Python"
+        euid: 501-65533
+      # Standard python (lowercase) from anywhere
+      - base: "python*"
+        euid: 501-65533
+
+  # DigitalOcean Credentials
+  - id: digitalocean
+    paths:
+      - "~/.config/doctl/config.yaml" # Contains access tokens
+    allow:
+      - base: "doctl"
+        euid: 501-65533
+      - base: "terraform"
+        euid: 501-65533
+
+  # Linode/Akamai Credentials
+  - id: linode
+    paths:
+      - "~/.config/linode-cli" # Contains API tokens
+    allow:
+      - base: "linode-cli"
+        euid: 501-65533
+      - base: "terraform"
+        euid: 501-65533
+
+  # Oracle Cloud Infrastructure Credentials
+  - id: oci
+    paths:
+      - "~/.oci/config" # Contains private keys and fingerprints
+      - "~/.oci/*_key.pem" # Private keys for API access
+    allow:
+      - base: "oci"
+        euid: 501-65533
+      - base: "terraform"
+        euid: 501-65533
+
+  # IBM Cloud Credentials
+  - id: ibmcloud
+    paths:
+      - "~/.bluemix/config.json" # Contains API keys
+      - "~/.ibm-cloud/config.json"
+    allow:
+      - base: "ibmcloud"
+        euid: 501-65533
+      - base: "terraform"
+        euid: 501-65533
+
+  # Kubernetes Configurations (contains cluster auth tokens/certs)
+  - id: kubernetes
+    paths:
+      - "~/.kube/config"
+      - "~/.kube/*-config"
+    allow:
+      # User processes only
+      - base: "kubectl"
+        euid: 501-65533
+      - base: "helm"
+        euid: 501-65533
+      - base: "k9s"
+        euid: 501-65533
+      - base: "kubectx"
+        euid: 501-65533
+      - base: "kubens"
+        euid: 501-65533
+      - base: "stern"
+        euid: 501-65533
+      - base: "flux"
+        euid: 501-65533
+
+  # Docker Credentials
+  - id: docker
+    paths:
+      - "~/.docker/config.json"
+    allow:
+      # User processes only
+      - base: "docker"
+        euid: 501-65533
+      - base: "docker-compose"
+        euid: 501-65533
+      - base: "podman"
+        euid: 501-65533
+      - base: "buildah"
+        euid: 501-65533
+      - base: "ko"
+        euid: 501-65533
+      # gcloud auth configure-docker uses Python to modify docker config
+      - base: "Python"
+        path: "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/*/Resources/Python.app/Contents/MacOS/Python"
+        args_pattern: "*configure-docker*"
+        euid: 501-65533
+      - base: "python*"
+        args_pattern: "*configure-docker*"
+        euid: 501-65533
+      # Common tools that might read docker config
+      - base: "cat"
+        euid: 501-65533
+      - base: "jq"
+        euid: 501-65533
+
+  # Vercel/Now Credentials
+  - id: vercel
+    paths:
+      - "~/.now/auth.json"
+      - "~/.vercel/auth.json"
+    allow:
+      - base: "vercel"
+        euid: 501-65533
+      - base: "now"
+        euid: 501-65533
+
+  # Netlify Credentials
+  - id: netlify
+    paths:
+      - "~/.netlify/config.json" # Contains access tokens
+    allow:
+      - base: "netlify"
+        euid: 501-65533
+
+  # Cloudflare Credentials
+  - id: cloudflare
+    paths:
+      - "~/.cloudflare/config.yaml"
+      - "~/.wrangler/config/default.toml" # Wrangler (Workers) credentials
+    allow:
+      - base: "cloudflared"
+        euid: 501-65533
+      - base: "wrangler"
+        euid: 501-65533
+      - base: "terraform"
+        euid: 501-65533
+
+  # ============================================================================
+  # PYTHON PACKAGE MANAGER CREDENTIALS
+  # ============================================================================
+
+  # PyPI upload credentials
+  - id: pypi
+    paths:
+      - "~/.pypirc"
+    allow:
+      - base: "twine" # Package upload tool
+        euid: 501-65533
+      - base: "poetry" # Can upload packages
+        euid: 501-65533
+      - base: "python*"
+        euid: 501-65533
+
+  # Pip configuration (may contain private repo credentials)
+  - id: pip
+    paths:
+      - "~/.pip/pip.conf"
+      - "~/.config/pip/pip.conf"
+    allow:
+      - base: "pip*"
+        euid: 501-65533
+      - base: "python*"
+        euid: 501-65533
+      - base: "pipenv"
+        euid: 501-65533
+      - base: "poetry"
+        euid: 501-65533
+
+  # ============================================================================
+  # PACKAGE MANAGER CREDENTIALS - User accounts
+  # ============================================================================
+
+  # NPM Tokens
+  - id: npm
+    paths:
+      - "~/.npmrc"
+    allow:
+      # User processes only
+      - base: "npm"
+        euid: 501-65533
+      - base: "node"
+        euid: 501-65533
+      - base: "yarn"
+        euid: 501-65533
+      - base: "pnpm"
+        euid: 501-65533
+      - base: "bun"
+        euid: 501-65533
+
+  # Ruby Gems Credentials
+  - id: gem
+    paths:
+      - "~/.gem/credentials"
+    allow:
+      # User processes only
+      - base: "gem"
+        euid: 501-65533
+      - base: "ruby"
+        euid: 501-65533
+      - base: "bundle"
+        euid: 501-65533
+      - base: "bundler"
+        euid: 501-65533
+
+  # Cargo (Rust) Credentials
+  - id: cargo
+    paths:
+      - "~/.cargo/credentials"
+      - "~/.cargo/credentials.toml"
+    allow:
+      # User processes only
+      - base: "cargo"
+        euid: 501-65533
+      - base: "rustc"
+        euid: 501-65533
+      - base: "rustup"
+        euid: 501-65533
+
+  # Git Credentials
+  - id: git
+    paths:
+      - "~/.git-credentials"
+      - "~/.config/git/credentials"
+    allow:
+      # User processes only
+      - base: "git"
+        euid: 501-65533
+      - base: "git-credential-*"
+        euid: 501-65533
+
+  # ============================================================================
+  # SYSTEM-WIDE CONFIGS - Root/daemon access only
+  # ============================================================================
+
+  # System NPM configuration
+  - id: npm_system
+    paths:
+      - "/etc/npmrc"
+      - "/usr/local/etc/npmrc"
+    allow:
+      - base: "npm"
+        euid: 0-65533  # All users can read global npm config
+      - base: "node"
+        euid: 0-65533
+      - base: "npx"
+        euid: 0-65533
+
+  # System Docker configuration
+  - id: docker_system
+    paths:
+      - "/etc/docker/config.json"
+      - "/etc/docker/daemon.json"
+    allow:
+      - base: "dockerd"
+        euid: 0
+      - base: "docker"
+        euid: 0
+      - base: "containerd"
+        euid: 0
+
+  # ============================================================================
+  # DATABASE CONNECTION FILES
+  # ============================================================================
+
+  # PostgreSQL credentials
+  - id: postgresql
+    paths:
+      - "~/.pgpass" # PostgreSQL password file
+    allow:
+      - base: "psql"
+        euid: 501-65533
+      - base: "pg_dump"
+        euid: 501-65533
+      - base: "pg_restore"
+        euid: 501-65533
+      - base: "pg_basebackup"
+        euid: 501-65533
+
+  # MySQL/MariaDB credentials
+  - id: mysql
+    paths:
+      - "~/.my.cnf" # MySQL/MariaDB config with passwords
+    allow:
+      - base: "mysql"
+        euid: 501-65533
+      - base: "mysqldump"
+        euid: 501-65533
+      - base: "mysqlbinlog"
+        euid: 501-65533
+      - base: "mariadb"
+        euid: 501-65533
+      - base: "mariadb-dump"
+        euid: 501-65533
+
+  # System MySQL/MariaDB configs
+  - id: mysql_system
+    paths:
+      - "/etc/mysql/*.cnf"
+      - "/var/lib/mysql/*.cnf"
+    allow:
+      - base: "mysqld"
+        euid: 0-999 # System users
+      - base: "mariadbd"
+        euid: 0-999
+
+  # System PostgreSQL configs
+  - id: postgresql_system
+    paths:
+      - "/etc/postgresql/*.conf"
+      - "/var/lib/postgresql/*.conf"
+    allow:
+      - base: "postgres"
+        euid: 0-999
+      - base: "postgresql"
+        euid: 0-999
+
+  # ============================================================================
+  # NETWORK AUTHENTICATION
+  # ============================================================================
+  # .netrc file (FTP/HTTP basic auth, Heroku API tokens)
+  - id: netrc
+    paths:
+      - "~/.netrc"
+    allow:
+      - base: "curl"
+        euid: 501-65533
+      - base: "wget"
+        euid: 501-65533
+      - base: "ftp"
+        euid: 501-65533
+      - base: "lftp"
+        euid: 501-65533
+      - base: "git" # Git can use .netrc for HTTP auth
+        euid: 501-65533
+      - base: "heroku" # Heroku CLI stores API tokens here
+        euid: 501-65533
+
+  # .authinfo file (Emacs/Gnus authentication)
+  - id: authinfo
+    paths:
+      - "~/.authinfo"
+      - "~/.authinfo.gpg"
+    allow:
+      - base: "emacs*"
+        euid: 501-65533
+      - base: "gnus" # Emacs news/mail reader
+        euid: 501-65533
+
+  # Terraform state and Ansible vault files removed - too many CI/CD tools need access
+  # Better protected via .gitignore and proper secrets management
+
+  # ============================================================================
+  # PASSWORD MANAGERS
+  # ============================================================================
+  - id: pass
+    paths:
+      - "~/.password-store/**/*.gpg"
+    allow:
+      - base: "pass"
+        euid: 501-65533
+      - base: "gpg"
+        euid: 501-65533
+      - base: "gpg2"
+        euid: 501-65533
+
+  # ============================================================================
+  # MISCELLANEOUS USER CREDENTIALS
+  # ============================================================================
+
+  # HashiCorp Vault Token
+  - id: vault
+    paths:
+      - "~/.vault-token"
+    allow:
+      # User processes only
+      - base: "vault"
+        euid: 501-65533
+
+  # Ansible Vault Password File
+  - id: ansible_vault
+    paths:
+      - "~/.vault_pass"
+      - "~/.ansible_vault_pass"
+    allow:
+      - base: "ansible"
+        euid: 501-65533
+      - base: "ansible-playbook"
+        euid: 501-65533
+      - base: "ansible-vault"
+        euid: 501-65533
+
+  # Environment files removed - too many tools need access, low attack value
+  # Better protected via .gitignore
+
+# Patterns to exclude from monitoring (not sensitive)
+# NOTE: *.pem files are NOT excluded as they often contain private keys
+excluded_patterns:
+  - "*.pub" # Public keys
+  - "*.crt" # Certificates
+  - "*.cer" # Certificates
+  - "authorized_keys" # SSH authorized keys file

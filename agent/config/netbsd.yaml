@@ -1,0 +1,20 @@
+# NoSwiper NetBSD Configuration
+# This file is embedded at compile time and provides the default rules for NetBSD
+# Users can override these with ~/.config/noswiper/config.yaml
+
+# Global exclusions - processes that can access ANY protected file
+# IMPORTANT: Every global exclusion MUST have a hardcoded path
+#   - Additional restrictions like base and ppid are recommended
+# Without path, a rule could match any process!
+
+# Default base paths for NetBSD
+default_base_paths:
+  - /usr/bin
+  - /bin
+  - /usr/sbin
+  - /sbin
+  - /usr/pkg/bin # NetBSD pkgsrc packages install here
+  - /usr/pkg/sbin
+  - /usr/pkg/libexec
+  - /usr/X11R7/bin # X11 binaries
+  - ~/.local/bin

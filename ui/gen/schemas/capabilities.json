@@ -1,0 +1,1 @@
+{"default":{"identifier":"default","description":"Default permissions","local":true,"windows":["main","violation"],"permissions":["core:default","core:tray:default","shell:allow-open"],"platforms":["macOS","linux"]}}

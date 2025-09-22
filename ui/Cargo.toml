@@ -1,0 +1,31 @@
+[package]
+name = "noswiper-ui"
+version = "0.1.0"
+edition = "2021"
+
+[lints.rust]
+unsafe_code = "deny"
+missing_docs = "warn"
+
+[lints.clippy]
+all = "warn"
+pedantic = "warn"
+nursery = "warn"
+cargo = "warn"
+unwrap_used = "warn"
+expect_used = "warn"
+
+[dependencies]
+tray-icon = "0.19"
+winit = "0.30"  # Required for tray-icon event loop
+image = "0.25"  # For creating icon from text
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+log = { workspace = true }
+env_logger = "0.11"
+chrono = "0.4"
+
+[[bin]]
+name = "noswiper-ui"
+path = "src/main.rs"

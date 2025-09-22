@@ -1,0 +1,927 @@
+# NoSwiper Linux Configuration
+# This file is embedded at compile time and provides the default rules for Linux
+# Users can override these with ~/.config/noswiper/config.yaml
+
+# Global exclusions - processes that can access ANY protected file
+# IMPORTANT: Every global exclusion MUST have a hardcoded path
+#   - Additional restrictions like base and ppid are recommended
+# Without path, a rule could match any process!
+global_exclusions:
+  # Popular backup programs
+  - base: "syncthing"
+    path: "/usr/bin/syncthing"
+    ppid: 1
+  # duplicity, borg, restic now in unix.yaml
+
+  # Cloud sync services (Linux versions)
+  - base: "dropbox"
+    path: "/opt/dropbox/dropbox*"
+    ppid: 1
+  - base: "insync"
+    path: "/usr/*bin/insync"
+    ppid: 1
+
+# Files and patterns to protect
+protected_files:
+  # SSH Keys and Known Hosts
+  - id: ssh_keys
+    paths:
+      - "~/.ssh/id_*"
+      - "~/.ssh/*_key"
+    allow:
+      # SSH tools
+      - base: "ssh"
+        euid: 1000-65533 # Regular user accounts on Linux
+      - base: "ssh-add"
+        euid: 1000-65533
+      - base: "ssh-agent"
+        euid: 1000-65533
+      - base: "ssh-keygen"
+        euid: 1000-65533
+      - base: "scp"
+        euid: 1000-65533
+      - base: "sftp"
+        euid: 1000-65533
+      - base: "sshd"
+        euid: 0 # Root for system SSH daemon
+      - base: "git"
+        euid: 1000-65533
+      - base: "rsync"
+        euid: 1000-65533
+      # GitHub CLI from Linuxbrew (versioned paths)
+      - base: "gh"
+        path: "/home/linuxbrew/.linuxbrew/Cellar/gh/*/bin/*"
+      - base: "gh"
+        path: "~/.linuxbrew/Cellar/gh/*/bin/*"
+
+  # SSH known_hosts moved to unix.yaml
+
+  # AWS Credentials
+  - id: aws_credentials
+    paths:
+      - "~/.aws/credentials"
+      - "~/.aws/config"
+    allow:
+      - base: "aws"
+      - base: "terraform"
+      - base: "ansible"
+      - base: "ansible-playbook"
+      - base: "packer"
+      # Python for boto3
+      - base: "python"
+        euid: 1000-65533
+      - base: "python3"
+        path: "~/.venv/*/bin/*"
+        euid: 1000-65533
+      - base: "python3"
+        path: "~/.*env/bin/*"
+        euid: 1000-65533
+      - base: "python3"
+        path: "/usr/*bin/python3"
+        euid: 1000-65533
+
+  # Google Cloud
+  - id: gcloud_credentials
+    paths:
+      - "~/.config/gcloud/credentials.db"
+      - "~/.config/gcloud/access_tokens.db"
+    allow:
+      - base: "gcloud"
+        euid: 1000-65533
+      - base: "gsutil"
+        euid: 1000-65533
+      - base: "bq"
+        euid: 1000-65533
+      - base: "kubectl"
+        euid: 1000-65533
+      - base: "python"
+        euid: 1000-65533
+      - base: "python3"
+        euid: 1000-65533
+
+  # Azure
+  - id: azure_credentials
+    paths:
+      - "~/.azure/accessTokens.json"
+      - "~/.azure/azureProfile.json"
+    allow:
+      - base: "az"
+      - base: "azure-cli"
+      - base: "pwsh" # PowerShell Core
+      - base: "powershell"
+
+  # DigitalOcean CLI
+  - id: digitalocean
+    paths:
+      - "~/.config/doctl/config.yaml"
+      - "~/.config/doctl/auth.json"
+    allow:
+      - base: "doctl"
+
+  # Linode CLI
+  - id: linode
+    paths:
+      - "~/.config/linode-cli"
+      - "~/.linode-cli"
+    allow:
+      - base: "linode-cli"
+
+  # Vultr CLI
+  - id: vultr
+    paths:
+      - "~/.vultr-cli.yaml"
+      - "~/.config/vultr/config.yaml"
+    allow:
+      - base: "vultr-cli"
+
+  # GPG Keys
+  - id: gpg_keys
+    paths:
+      - "~/.gnupg/private-keys*"
+      - "~/.gnupg/secring.gpg"
+    allow:
+      - base: "gpg"
+      - base: "gpg2"
+      - base: "gpg-agent"
+      - base: "pinentry*"
+      - base: "pass"
+      - base: "seahorse" # GNOME keyring manager
+        ppid: 1
+
+  # Package Manager Credentials
+  - id: npm
+    paths:
+      - "~/.npmrc"
+    allow:
+      - base: "npm"
+      - base: "node"
+      - base: "yarn"
+      - base: "pnpm"
+
+  # Python credentials moved to unix.yaml
+
+  # Ruby Gems Credentials
+  - id: gem
+    paths:
+      - "~/.gem/credentials"
+      - "~/.bundle/config"
+    allow:
+      - base: "gem"
+      - base: "bundle"
+      - base: "bundler"
+      - base: "ruby"
+
+  # Maven/Java Credentials
+  - id: maven
+    paths:
+      - "~/.m2/settings.xml"
+      - "~/.m2/settings-security.xml"
+    allow:
+      - base: "mvn"
+      - base: "maven"
+      - base: "gradle"
+      - base: "java"
+
+  # Composer (PHP) Credentials
+  - id: composer
+    paths:
+      - "~/.config/composer/auth.json"
+      - "~/.composer/auth.json"
+    allow:
+      - base: "composer"
+      - base: "php"
+
+  - id: cargo
+    paths:
+      - "~/.cargo/credentials"
+    allow:
+      - base: "cargo"
+      - base: "rustc"
+      - base: "rustup"
+
+  - id: docker
+    paths:
+      - "~/.docker/config.json"
+    allow:
+      - base: "docker"
+      - base: "docker-compose"
+      - base: "docker-credential-*" # All Docker credential helpers
+
+  # Podman/Buildah Container Credentials
+  - id: podman
+    paths:
+      - "~/.config/containers/auth.json"
+    allow:
+      - base: "podman"
+      - base: "buildah"
+      - base: "skopeo"
+
+  # Kubernetes
+  - id: kubernetes_config
+    paths:
+      - "~/.kube/config"
+      - "~/.kube/*/config" # Multiple cluster configs
+    allow:
+      - base: "kubectl"
+      - base: "helm"
+      - base: "k9s"
+      - base: "minikube"
+      - base: "kind"
+      - base: "k3s"
+      - base: "k0s"
+      - base: "microk8s"
+      - base: "lens"
+        ppid: 1
+      - base: "octant"
+        ppid: 1
+
+  # VMware Workstation/Player Credentials
+  - id: vmware
+    paths:
+      - "~/.vmware/preferences" # Contains vCenter credentials
+      - "~/.vmware/*/vmware*.vmx" # VM configs may have passwords
+      - "~/.vmware/credstore/*" # Credential store
+      - "~/.vmware/config"
+    allow:
+      - base: "vmware"
+      - base: "vmware-workstation"
+      - base: "vmware-player"
+      - base: "vmrun" # VMware command line utility
+      - base: "vmware-vmx"
+
+  # VMware vSphere/ESXi CLI and Server Credentials
+  - id: vsphere_cli
+    paths:
+      - "~/.govmomi/credentials.json" # govc credentials
+      - "~/.vsphere-cli/*"
+      - "~/.vmware/credstore/vicredentials.xml" # vSphere credential store
+      - "~/.vmware/vicredentials.xml"
+      - "/etc/vmware/vsphere-ui/webclient.properties" # vSphere web client
+      - "/etc/vmware/vpx/*.xml" # vCenter configs
+      - "/etc/vmware/vpxd/vpxd.cfg" # vCenter Server config
+      - "/etc/vmware-vpx/*.xml"
+      - "/storage/db/vmware-vpx/*.xml" # vCenter database configs
+    allow:
+      - base: "govc"
+      - base: "esxcli"
+      - base: "ovftool"
+      - base: "vmware-cmd"
+      - base: "vicfg-*" # Various vSphere CLI tools
+      - base: "vifs"
+      - base: "vmkfstools"
+      - base: "vmware-vdiskmanager"
+      - base: "vpxd" # vCenter Server daemon
+
+  # VMware PowerCLI Credentials
+  - id: powercli
+    paths:
+      - "~/.config/VMware/PowerCLI/*"
+      - "~/.local/share/VMware/credstore/*"
+    allow:
+      - base: "pwsh"
+      - base: "powershell"
+
+  # VMware NSX Credentials
+  - id: nsx
+    paths:
+      - "~/.nsx-cli/*"
+      - "/etc/vmware/nsx/*.xml"
+      - "/etc/vmware/nsx-manager/*.properties"
+    allow:
+      - base: "nsx-cli"
+      - base: "nsxadmin"
+      - base: "nsx-proxy"
+
+  # VMware vRealize/Tanzu Credentials
+  - id: vrealize
+    paths:
+      - "~/.vra/*" # vRealize Automation
+      - "~/.vrli/*" # vRealize Log Insight
+      - "~/.vrops/*" # vRealize Operations
+      - "~/.tanzu/*"
+      - "~/.kube-tanzu/*"
+      - "~/.config/tanzu/*"
+    allow:
+      - base: "vra"
+      - base: "vrli"
+      - base: "vrops"
+      - base: "tanzu"
+      - base: "tkg" # Tanzu Kubernetes Grid
+
+  # Proxmox VE Credentials
+  - id: proxmox
+    paths:
+      - "~/.pveclient" # Proxmox client config
+      - "~/.config/proxmox/*"
+      - "/etc/pve/priv/*.key" # Proxmox cluster keys (on Proxmox nodes)
+      - "/etc/pve/user.cfg" # User configuration
+      - "/etc/pve/datacenter.cfg"
+      - "/etc/pve/authkey.pub" # Authentication key
+      - "/etc/pve/pve-root-ca.key" # Root CA key
+    allow:
+      - base: "pvesh" # Proxmox shell
+      - base: "pvecm" # Proxmox cluster manager
+      - base: "pveam" # Proxmox appliance manager
+      - base: "pvesm" # Proxmox storage manager
+      - base: "qm" # QEMU/KVM Virtual Machine Manager
+      - base: "pct" # Proxmox Container Toolkit
+      - base: "proxmox-backup-client"
+      - base: "pmxcfs" # Proxmox cluster filesystem
+
+  # Nutanix Credentials
+  - id: nutanix
+    paths:
+      - "~/.nutanix/*"
+      - "~/.acli/*" # Acropolis CLI
+      - "~/.ncli/*" # Nutanix CLI
+      - "~/.config/nutanix/*"
+    allow:
+      - base: "acli"
+      - base: "ncli"
+      - base: "ncc" # Nutanix Cluster Check
+      - base: "nuclei" # Nutanix tool
+
+  # VirtualBox Credentials
+  - id: virtualbox_configs
+    paths:
+      - "~/.config/VirtualBox/*.xml" # May contain RDP passwords
+      - "~/VirtualBox VMs/*/*.vbox" # VM configurations
+    allow:
+      - base: "VirtualBox"
+        ppid: 1
+      - base: "VBoxManage"
+      - base: "VBoxHeadless"
+
+  # QEMU/KVM/libvirt Credentials
+  - id: libvirt
+    paths:
+      - "~/.config/libvirt/auth.conf" # libvirt authentication
+      - "~/.virtinst/*" # virt-install configs
+      - "/etc/libvirt/*.conf"
+      - "/etc/libvirt/qemu/*.xml" # VM definitions may have passwords
+    allow:
+      - base: "virsh"
+      - base: "virt-manager"
+        ppid: 1
+      - base: "virt-install"
+      - base: "virt-viewer"
+        ppid: 1
+      - base: "libvirtd"
+
+  # Vagrant Credentials
+  - id: vagrant_configs
+    paths:
+      - "~/.vagrant.d/data/*"
+      - "~/.vagrant.d/boxes/*/*.ovf"
+      - "*/.vagrant/machines/*/virtualbox/private_key" # Vagrant SSH keys
+    allow:
+      - base: "vagrant"
+
+  # Xen/XenServer/XCP-ng Credentials
+  - id: xen
+    paths:
+      - "~/.xenrc" # XenServer CLI config
+      - "~/.xcp/*"
+      - "/etc/xen/*.cfg" # Xen domain configs
+    allow:
+      - base: "xe" # XenServer CLI
+      - base: "xl" # Xen management tool
+      - base: "xapi"
+      - base: "xcp-rrdd"
+
+  # OpenStack Credentials
+  - id: openstack
+    paths:
+      - "~/.config/openstack/clouds.yaml"
+      - "~/.config/openstack/clouds-public.yaml"
+      - "~/.config/openstack/secure.yaml" # Contains passwords
+      - "~/.*-openrc.sh" # OpenStack RC files
+      - "~/.nova/*"
+      - "~/.neutron/*"
+    allow:
+      - base: "openstack"
+      - base: "nova"
+      - base: "neutron"
+      - base: "glance"
+      - base: "cinder"
+      - base: "swift"
+
+  # Shell history rules moved to unix.yaml with improved targeting
+
+  # Environment files removed from monitoring - too many tools need access
+
+  # Network authentication moved to unix.yaml
+
+  # Cryptocurrency Wallets - EXTREMELY HIGH VALUE TARGETS
+  - id: bitcoin_wallets
+    paths:
+      - "~/.bitcoin/wallet.dat"
+      - "~/.bitcoin/wallets/*.dat"
+    allow:
+      - base: "bitcoin-qt"
+        euid: 1000-65533
+      - base: "bitcoind"
+        euid: 1000-65533
+      - base: "bitcoin-cli"
+        euid: 1000-65533
+
+  - id: electrum_wallet
+    paths:
+      - "~/.electrum/wallets/*"
+    allow:
+      - base: "electrum"
+
+  - id: ethereum_wallets
+    paths:
+      - "~/.ethereum/keystore/*"
+    allow:
+      - base: "geth"
+      - base: "parity"
+
+  - id: exodus_wallet
+    paths:
+      - "~/.config/Exodus/exodus.wallet/*"
+    allow:
+      - base: "exodus"
+
+  - id: atomic_wallet
+    paths:
+      - "~/.config/atomic/Local Storage/leveldb/*"
+    allow:
+      - base: "atomic"
+
+  - id: monero_wallet
+    paths:
+      - "~/Monero/wallets/*"
+      - "~/.bitmonero/*"
+    allow:
+      - base: "monero-wallet-gui"
+      - base: "monero-wallet-cli"
+      - base: "monerod"
+
+  # Communication Apps (Linux paths)
+  - id: discord_tokens
+    paths:
+      - "~/.config/discord/Local Storage/leveldb/*"
+      - "~/.config/discord/Local State"
+      - "~/.config/discord/Cookies"
+    allow:
+      - base: "discord"
+        euid: 1000-65533
+      - base: "Discord"
+        euid: 1000-65533
+
+  - id: slack_data
+    paths:
+      - "~/.config/Slack/Local Storage/leveldb/*"
+      - "~/.config/Slack/Cookies"
+      - "~/.config/Slack/storage/*"
+    allow:
+      - base: "slack"
+
+  - id: signal_data
+    paths:
+      - "~/.config/Signal/sql/*"
+      - "~/.config/Signal/config.json"
+      - "~/.config/Signal/Local Storage/leveldb/*"
+    allow:
+      - base: "signal-desktop"
+
+  - id: telegram_data
+    paths:
+      - "~/.local/share/TelegramDesktop/tdata/*"
+    allow:
+      - base: "telegram-desktop"
+      - base: "Telegram"
+
+  - id: element_data
+    paths:
+      - "~/.config/Element/Local Storage/leveldb/*"
+      - "~/.config/Element/storage/*"
+    allow:
+      - base: "element-desktop"
+
+  # Gaming Platforms
+  - id: steam_credentials
+    paths:
+      - "~/.steam/steam/config/loginusers.vdf"
+      - "~/.steam/steam/config/config.vdf"
+      - "~/.local/share/Steam/config/loginusers.vdf"
+      - "~/.local/share/Steam/config/config.vdf"
+    allow:
+      - base: "steam"
+        euid: 1000-65533
+      - base: "steamcmd"
+        euid: 1000-65533
+
+  # VPN Configurations
+  - id: openvpn_profiles
+    paths:
+      - "~/.config/openvpn/*"
+      - "/etc/openvpn/*.conf"
+      - "/etc/openvpn/client/*.conf"
+    allow:
+      - base: "openvpn"
+
+  - id: wireguard_configs
+    paths:
+      - "/etc/wireguard/*.conf"
+      - "~/.config/wireguard/*.conf"
+    allow:
+      - base: "wg"
+      - base: "wg-quick"
+
+  - id: networkmanager
+    paths:
+      - "/etc/NetworkManager/system-connections/*"
+    allow:
+      - base: "NetworkManager"
+      - base: "nmcli"
+
+  # Linux Keyring Systems
+  - id: gnome_keyring
+    paths:
+      - "~/.local/share/keyrings/*"
+      - "~/.gnome2/keyrings/*"
+    allow:
+      - base: "gnome-keyring-daemon"
+      - base: "seahorse"
+      - base: "evolution"
+      - base: "firefox"
+      - base: "chromium-browser"
+      - base: "google-chrome"
+
+  - id: kwallet_data
+    paths:
+      - "~/.local/share/kwalletd/*"
+      - "~/.kde*/share/apps/kwallet/*"
+    allow:
+      - base: "kwalletd5"
+      - base: "kwalletmanager"
+      - base: "konsole"
+      - base: "dolphin"
+      - base: "firefox"
+
+  # Database Clients (Linux)
+  - id: dbeaver_configs
+    paths:
+      - "~/.dbeaver*/workspace*/.metadata/.plugins/org.jkiss.dbeaver.core/credentials-config.json"
+      - "~/.local/share/DBeaverData/workspace*/.metadata/.plugins/org.jkiss.dbeaver.core/credentials-config.json"
+    allow:
+      - base: "dbeaver"
+
+  - id: mysql_workbench
+    paths:
+      - "~/.mysql/workbench/connections.xml"
+      - "~/.mysql/workbench/server_instances.xml"
+    allow:
+      - base: "mysql-workbench"
+
+  - id: pgadmin_configs
+    paths:
+      - "~/.pgadmin/*"
+      - "~/.local/share/pgadmin/*"
+    allow:
+      - base: "pgadmin4"
+      - base: "heat"
+      - base: "keystone"
+
+  # Terraform and Ansible vault files removed - better handled by .gitignore
+
+  # Cloud-init data removed - better protected by file permissions
+
+  # oVirt/RHEV Credentials
+  - id: ovirt
+    paths:
+      - "~/.ovirtshellrc" # oVirt shell config
+      - "~/.config/ovirt-shell/*"
+    allow:
+      - base: "ovirt-shell"
+      - base: "engine-config"
+      - base: "vdsm"
+
+  # Hyper-V/Azure Stack HCI (when running on Linux)
+  - id: hyperv
+    paths:
+      - "~/.azure/azureStackHCI/*"
+      - "~/.config/azure-stack/*"
+    allow:
+      - base: "hvc" # Hyper-V client
+      - base: "wmic" # WMI client for remote Windows management
+
+  # Browser Password Stores - Firefox
+  - id: firefox_passwords
+    paths:
+      - "~/.mozilla/firefox/*/logins.json"
+      - "~/.mozilla/firefox/*/key*.db"
+    allow:
+      - base: "firefox"
+        ppid: 1
+      - base: "firefox-esr"
+        ppid: 1
+
+  # Browser Password Stores - Chrome/Chromium
+  - id: chrome_passwords
+    paths:
+      - "~/.config/google-chrome/*/Login Data"
+      - "~/.config/google-chrome-beta/*/Login Data"
+      - "~/.config/google-chrome-unstable/*/Login Data"
+    allow:
+      - base: "google-chrome"
+      - base: "google-chrome-stable"
+      - base: "google-chrome-beta"
+      - base: "google-chrome-unstable"
+      - base: "chrome"
+
+  - id: chromium_passwords
+    paths:
+      - "~/.config/chromium/*/Login Data"
+      - "~/.config/chromium-browser/*/Login Data"
+    allow:
+      - base: "chromium"
+      - base: "chromium-browser"
+
+  # Brave Browser
+  - id: brave_passwords
+    paths:
+      - "~/.config/BraveSoftware/Brave-Browser/*/Login Data"
+    allow:
+      - base: "brave"
+      - base: "brave-browser"
+
+  # Edge (Linux version)
+  - id: edge_passwords
+    paths:
+      - "~/.config/microsoft-edge/*/Login Data"
+    allow:
+      - base: "microsoft-edge"
+      - base: "microsoft-edge-stable"
+      - base: "microsoft-edge-beta"
+      - base: "microsoft-edge-dev"
+
+  # Vivaldi
+  - id: vivaldi_passwords
+    paths:
+      - "~/.config/vivaldi/*/Login Data"
+    allow:
+      - base: "vivaldi"
+      - base: "vivaldi-stable"
+
+  # Opera
+  - id: opera_passwords
+    paths:
+      - "~/.config/opera/*/Login Data"
+    allow:
+      - base: "opera"
+
+  # Tor Browser
+  - id: tor_browser_data
+    paths:
+      - "~/.local/share/torbrowser/tbb/*/Browser/TorBrowser/Data/Browser/profile.default/logins.json"
+      - "~/Downloads/tor-browser*/Browser/TorBrowser/Data/Browser/profile.default/logins.json"
+    allow:
+      - base: "firefox.real" # Tor Browser uses Firefox
+        ppid: 1
+      - base: "tor-browser"
+        ppid: 1
+
+  # LibreWolf (Privacy-focused Firefox fork)
+  - id: librewolf_passwords
+    paths:
+      - "~/.librewolf/*/logins.json"
+      - "~/.librewolf/*/key*.db"
+      - "~/.librewolf/*/cookies.sqlite"
+    allow:
+      - base: "librewolf"
+        ppid: 1
+
+  # GNOME Keyring
+  - paths:
+      - "~/.local/share/keyrings/*.keyring"
+    allow:
+      - base: "gnome-keyring*" # Matches gnome-keyring-daemon, etc.
+        euid: 1000-65533
+      - base: "seahorse"
+        ppid: 1
+        euid: 1000-65533
+      # Common apps that use GNOME keyring - be specific
+      - base: "firefox"
+        ppid: 1
+        euid: 1000-65533
+      - base: "chromium*"
+        ppid: 1
+        euid: 1000-65533
+      - base: "google-chrome*"
+        ppid: 1
+        euid: 1000-65533
+      - base: "evolution"
+        ppid: 1
+        euid: 1000-65533
+
+  # KDE Wallet
+  - paths:
+      - "~/.local/share/kwalletd/*.kwl"
+    allow:
+      - base: "kwalletd*"
+        euid: 1000-65533
+      - base: "kwalletmanager*"
+        ppid: 1
+        euid: 1000-65533
+      # Common KDE apps - be specific
+      - base: "konsole"
+        ppid: 1
+        euid: 1000-65533
+      - base: "dolphin"
+        ppid: 1
+        euid: 1000-65533
+      - base: "kate"
+        ppid: 1
+        euid: 1000-65533
+      - base: "kmail"
+        ppid: 1
+        euid: 1000-65533
+
+  # Password store (pass) moved to unix.yaml
+  # Linux-specific GUI for pass
+  - paths:
+      - "~/.password-store/**/*.gpg"
+    allow:
+      - base: "qtpass"
+        ppid: 1
+        euid: 1000-65533
+
+  - paths:
+      - "~/.config/Bitwarden/**"
+    allow:
+      - base: "bitwarden"
+        ppid: 1
+      - base: "bw" # Bitwarden CLI
+
+  - paths:
+      - "~/.config/keepassxc/*.kdbx"
+    allow:
+      - base: "keepassxc"
+        ppid: 1
+      - base: "keepassxc-cli"
+
+  # Email Clients
+  - paths:
+      - "~/.thunderbird/*/logins.json"
+    allow:
+      - base: "thunderbird"
+        ppid: 1
+
+  - paths:
+      - "~/.config/evolution/mail/accounts.xml"
+    allow:
+      - base: "evolution"
+        ppid: 1
+
+  # Development Tools
+  - paths:
+      - "~/.config/filezilla/sitemanager.xml"
+    allow:
+      - base: "filezilla"
+        ppid: 1
+
+  - paths:
+      - "~/.config/filezilla/recentservers.xml"
+    allow:
+      - base: "filezilla"
+        ppid: 1
+
+  # Database Clients
+  - id: dbeaver
+    paths:
+      - "~/.dbeaver/credentials-config.json"
+      - "~/.local/share/DBeaverData/workspace*/.dbeaver/credentials-config.json"
+    allow:
+      - base: "dbeaver"
+        ppid: 1
+      - base: "DBeaver"
+        ppid: 1
+
+  # JetBrains IDEs Database Connections
+  - id: jetbrains_datagrip
+    paths:
+      - "~/.config/JetBrains/DataGrip*/options/database.*.xml"
+      - "~/.config/JetBrains/IntelliJIdea*/options/database.*.xml"
+      - "~/.DataGrip*/config/options/database.*.xml"
+    allow:
+      - base: "datagrip"
+        ppid: 1
+      - base: "idea"
+        ppid: 1
+      - base: "idea.sh"
+        ppid: 1
+
+  # VPN Configurations
+  - id: vpn_configs
+    paths:
+      - "~/.config/openvpn/*"
+      - "/etc/NetworkManager/system-connections/*"
+      - "/etc/wireguard/*.conf"
+      - "~/.config/wireguard/*.conf"
+    allow:
+      - base: "openvpn"
+      - base: "NetworkManager"
+        ppid: 1
+      - base: "nm-applet"
+        ppid: 1
+      - base: "nm-connection-editor"
+        ppid: 1
+      - base: "wg"
+      - base: "wg-quick"
+      - base: "wireguard-tools"
+
+  # Remmina Remote Desktop Client
+  - id: remmina
+    paths:
+      - "~/.config/remmina/*.remmina"
+      - "~/.local/share/remmina/*.remmina"
+    allow:
+      - base: "remmina"
+        ppid: 1
+
+  # FreeRDP Client
+  - id: freerdp_configs
+    paths:
+      - "~/.config/freerdp/*"
+    allow:
+      - base: "xfreerdp"
+        ppid: 1
+      - base: "wlfreerdp" # Wayland version
+        ppid: 1
+
+  # rdesktop Client
+  - id: rdesktop_configs
+    paths:
+      - "~/.rdesktop/*"
+    allow:
+      - base: "rdesktop"
+        ppid: 1
+
+  # Git Clients
+  - id: gitkraken_profiles
+    paths:
+      - "~/.gitkraken/profiles/*"
+    allow:
+      - base: "gitkraken"
+        ppid: 1
+      - base: "GitKraken"
+        ppid: 1
+
+  # Shell history moved to unix.yaml with improved targeting
+
+  # HashiCorp Vault token moved to unix.yaml
+
+  # Cryptocurrency Wallets (high value targets)
+  - id: crypto_wallets
+    paths:
+      - "~/.electrum/wallets/*" # Electrum Bitcoin wallet
+      - "~/.bitcoin/wallet.dat" # Bitcoin Core
+      - "~/.monero/wallet*" # Monero
+      - "~/.ethereum/keystore/*" # Ethereum
+    allow:
+      - base: "electrum"
+        ppid: 1
+      - base: "bitcoin-qt"
+        ppid: 1
+      - base: "bitcoind"
+      - base: "monero-wallet-gui"
+        ppid: 1
+      - base: "monerod"
+      - base: "geth" # Ethereum client
+
+# Patterns to exclude from monitoring (not sensitive)
+# NOTE: *.pem files are NOT excluded as they often contain private keys
+excluded_patterns:
+  - "*.pub" # Public keys
+  - "*.crt" # Certificates
+  - "*.cer" # Certificates
+  - "authorized_keys" # SSH authorized keys file
+
+# Default base paths for Linux
+default_base_paths:
+  - /usr/bin
+  - /bin
+  - /usr/sbin
+  - /sbin
+  - /usr/local/bin
+  - /usr/local/sbin
+  - /opt/*/bin
+  - /snap/bin
+  - /var/lib/flatpak/exports/bin
+  - ~/.local/bin
+  - /nix/store/*/bin # Nix packages
+  - /run/current-system/sw/bin # NixOS system packages
+  - ~/.nix-profile/bin # User nix packages
+  - /home/linuxbrew/.linuxbrew/bin # Linuxbrew
+  - /home/linuxbrew/.linuxbrew/sbin
+  - /home/linuxbrew/.linuxbrew/Cellar/*/bin
+  - /home/linuxbrew/.linuxbrew/Cellar/*/sbin
+  - ~/.linuxbrew/bin # User Linuxbrew
+  - ~/.linuxbrew/sbin
+  - ~/.linuxbrew/Cellar/*/bin
+  - ~/.linuxbrew/Cellar/*/sbin
+
