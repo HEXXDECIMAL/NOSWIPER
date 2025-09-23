@@ -1,12 +1,17 @@
+//! NoSwiper library - credential protection daemon
+//!
+//! This crate provides the core functionality for monitoring and protecting
+//! sensitive credential files from unauthorized access.
+
 pub mod allow_rule;
 pub mod config;
 pub mod process_context;
 pub mod rules;
 
+/// Matcher module provides types for process matching in debug tools
 pub mod matcher {
-    use crate::allow_rule::AllowRule;
-    use crate::process_context::ProcessContext;
-
+    /// Information about a process for rule matching
+    #[derive(Debug, Clone)]
     pub struct ProcessInfo {
         pub path: String,
         pub signature: Option<String>,
@@ -15,5 +20,7 @@ pub mod matcher {
         pub name: String,
     }
 
+    /// Placeholder for rule matching functionality
+    #[derive(Debug, Clone)]
     pub struct RuleMatcher;
 }

@@ -739,6 +739,9 @@ impl Monitor {
         // Create process context for exec event checking
         use crate::process_context::ProcessContext;
 
+        // Parse signing info to extract app_id and team_id
+        let (app_id, team_id) = parse_signing_info(signing_info.as_deref());
+
         // Get platform_binary from cache if available
         let platform_binary = pid
             .and_then(|p| self.process_cache.get(&p))
@@ -748,8 +751,8 @@ impl Monitor {
             path: real_process_path.clone(),
             pid,
             ppid,
-            team_id: None, // TODO: Parse from signing_info
-            app_id: None,  // TODO: Parse from signing_info
+            team_id,
+            app_id,
             args: Some(args.to_vec()),
             uid: None, // TODO: Get user ID
             euid,
@@ -1033,6 +1036,9 @@ impl Monitor {
         // Create process context for the new rule system
         use crate::process_context::ProcessContext;
 
+        // Parse signing info to extract app_id and team_id
+        let (app_id, team_id) = parse_signing_info(signing_info.as_deref());
+
         // Get platform_binary from cache if available
         let platform_binary = pid
             .and_then(|p| self.process_cache.get(&p))
@@ -1042,10 +1048,10 @@ impl Monitor {
             path: real_process_path.clone(),
             pid,
             ppid,
-            team_id: None, // TODO: Parse from signing_info
-            app_id: None,  // TODO: Parse from signing_info
-            args: None,    // TODO: Get command-line args
-            uid: None,     // TODO: Get user ID
+            team_id,
+            app_id,
+            args: None, // TODO: Get command-line args
+            uid: None,  // TODO: Get user ID
             euid,
             platform_binary,
         };
@@ -2446,4 +2452,70 @@ impl Monitor {
 
     // REMOVED: get_code_signer - We should NEVER access binaries!
     // All signing info comes from eslogger events to avoid filesystem access
+}
+
+/// Parse signing info string to extract app_id and team_id
+///
+/// Signing info format can be:
+/// - "app_id [team_id]" - Both app and team ID
+/// - "team_id" - Just team ID
+/// - None - No signing info
+///
+/// Returns (app_id, team_id) tuple
+fn parse_signing_info(signing_info: Option<&str>) -> (Option<String>, Option<String>) {
+    match signing_info {
+        Some(info) if !info.is_empty() => {
+            // Check for format: "app_id [team_id]"
+            if let Some(bracket_pos) = info.find('[') {
+                let app_id = info[..bracket_pos].trim();
+                let team_id = info[bracket_pos + 1..].trim_end_matches(']').trim();
+
+                (
+                    if app_id.is_empty() {
+                        None
+                    } else {
+                        Some(app_id.to_string())
+                    },
+                    if team_id.is_empty() {
+                        None
+                    } else {
+                        Some(team_id.to_string())
+                    },
+                )
+            } else {
+                // Just team_id
+                (None, Some(info.to_string()))
+            }
+        }
+        _ => (None, None),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_signing_info() {
+        // Test app_id and team_id
+        assert_eq!(
+            parse_signing_info(Some("com.apple.Safari [com.apple]")),
+            (
+                Some("com.apple.Safari".to_string()),
+                Some("com.apple".to_string())
+            )
+        );
+
+        // Test just team_id
+        assert_eq!(
+            parse_signing_info(Some("2FNC3A47ZF")),
+            (None, Some("2FNC3A47ZF".to_string()))
+        );
+
+        // Test empty
+        assert_eq!(parse_signing_info(None), (None, None));
+
+        // Test empty string
+        assert_eq!(parse_signing_info(Some("")), (None, None));
+    }
 }
