@@ -1,10 +1,11 @@
 use crate::cli::{Mechanism, Mode};
 use crate::config::Config;
-use crate::ipc_server::{Event, EventType, IpcServer, SuspendedProcess};
+use crate::ipc_server::{Event, EventType, IpcServer, ProcessTreeEntry, SuspendedProcess};
 use crate::json_logger::{JsonLogger, ProcessDetails};
 #[cfg(target_os = "macos")]
 use crate::rules::Decision;
 use crate::rules::RuleEngine;
+use crate::types::ExecEvent;
 use anyhow::Result;
 #[cfg(target_os = "macos")]
 use serde::Deserialize;
@@ -17,9 +18,12 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Arc;
 #[cfg(target_os = "macos")]
+use std::sync::Mutex;
+#[cfg(target_os = "macos")]
 use std::time::{Duration, Instant};
 #[cfg(target_os = "macos")]
 use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::sync::RwLock;
 
 #[cfg(target_os = "macos")]
 use tokio::process::Command as TokioCommand;
@@ -90,7 +94,7 @@ impl ProcessInfo {
 
 pub struct Monitor {
     rule_engine: RuleEngine,
-    mode: Mode,
+    mode: Arc<RwLock<Mode>>,
     mechanism: Mechanism,
     verbose: bool,
     #[allow(dead_code)] // Used in future functionality
@@ -102,6 +106,8 @@ pub struct Monitor {
     process_cache: HashMap<u32, ProcessInfo>,
     #[cfg(target_os = "macos")]
     cache_ttl: Duration,
+    #[cfg(target_os = "macos")]
+    vendor_cache: Arc<Mutex<HashMap<String, Option<String>>>>, // team_id -> vendor_name cache
 }
 
 // These structs are for potential future use with typed JSON parsing
@@ -123,7 +129,7 @@ impl Monitor {
         stop_parent: bool,
     ) -> Self {
         // Load config from embedded YAML
-        let config = Config::default().expect("Failed to load default config");
+        let config = Config::load_default().expect("Failed to load default config");
 
         // Create JSON logger and log its location
         let json_logger = JsonLogger::new().unwrap_or_default();
@@ -131,15 +137,19 @@ impl Monitor {
             log::info!("JSON event log: {}", log_path.display());
         }
 
-        // Create IPC server and log its location
-        let ipc_server = Arc::new(IpcServer::new().expect("Failed to create IPC server"));
+        // Create shared mode
+        let shared_mode = Arc::new(RwLock::new(mode));
+
+        // Create IPC server with shared mode and log its location
+        let ipc_server =
+            Arc::new(IpcServer::new(shared_mode.clone()).expect("Failed to create IPC server"));
         if let Ok(socket_path) = IpcServer::get_socket_path() {
             log::info!("IPC socket: {}", socket_path.display());
         }
 
         Self {
             rule_engine: RuleEngine::with_debug(config, debug),
-            mode,
+            mode: shared_mode,
             mechanism,
             verbose,
             debug,
@@ -150,11 +160,15 @@ impl Monitor {
             process_cache: HashMap::new(),
             #[cfg(target_os = "macos")]
             cache_ttl: Duration::from_secs(300), // 5 minute TTL for process cache
+            #[cfg(target_os = "macos")]
+            vendor_cache: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
     pub async fn start(&mut self) -> Result<()> {
-        log::info!("Starting NoSwiper agent in {} mode", self.mode);
+        let mode = self.mode.read().await;
+        log::info!("Starting NoSwiper agent in {} mode", *mode);
+        drop(mode);
         log::info!("Using monitoring mechanism: {}", self.mechanism);
 
         // Start IPC server in background
@@ -165,7 +179,7 @@ impl Monitor {
             }
         });
 
-        if let Mode::Interactive = self.mode {
+        if let Mode::Interactive = *self.mode.read().await {
             self.print_interactive_banner();
         }
 
@@ -414,16 +428,16 @@ impl Monitor {
                                 if let Some(protected_path) =
                                     self.check_args_for_protected_paths(&args)
                                 {
-                                    self.handle_exec_with_protected_path(
-                                        &process_path,
-                                        &args,
-                                        &protected_path,
+                                    let event = ExecEvent::new(
+                                        process_path.clone(),
+                                        args.clone(),
+                                        protected_path,
                                         pid,
                                         ppid,
                                         euid,
                                         signing_info,
-                                    )
-                                    .await?;
+                                    );
+                                    self.handle_exec_with_protected_path(event).await?;
                                 }
                             }
                             Ok(None) => {
@@ -710,25 +724,16 @@ impl Monitor {
     }
 
     #[cfg(target_os = "macos")]
-    #[allow(clippy::too_many_arguments)] // TODO: Complete refactor to use parameter struct
-    async fn handle_exec_with_protected_path(
-        &mut self,
-        process_path: &Path,
-        args: &[String],
-        protected_path: &Path,
-        pid: Option<u32>,
-        ppid: Option<u32>,
-        euid: Option<u32>,
-        signing_info: Option<String>,
-    ) -> Result<()> {
+    async fn handle_exec_with_protected_path(&mut self, event: ExecEvent) -> Result<()> {
         // Resolve symlinks to get real paths
-        let real_process_path = self.normalize_path(process_path);
-        let real_protected_path = self.normalize_path(protected_path);
+        let real_process_path = self.normalize_path(&event.process_path);
+        let real_protected_path = self.normalize_path(event.protected_path.as_path());
 
         // Get code signing info (no longer need PID strings for simplified logs)
 
         #[cfg(target_os = "macos")]
-        let _signer_info = signing_info
+        let _signer_info = event
+            .signing_info
             .as_ref()
             .map(|s| format!(" [{}]", s))
             .unwrap_or_default();
@@ -740,22 +745,23 @@ impl Monitor {
         use crate::process_context::ProcessContext;
 
         // Parse signing info to extract app_id and team_id
-        let (app_id, team_id) = parse_signing_info(signing_info.as_deref());
+        let (app_id, team_id) = parse_signing_info(event.signing_info.as_deref());
 
         // Get platform_binary from cache if available
-        let platform_binary = pid
+        let platform_binary = event
+            .pid()
             .and_then(|p| self.process_cache.get(&p))
             .map(|entry| entry.is_platform_binary);
 
         let context = ProcessContext {
             path: real_process_path.clone(),
-            pid,
-            ppid,
-            team_id,
+            pid: event.pid(),
+            ppid: event.ppid(),
+            team_id: team_id.clone(),
             app_id,
-            args: Some(args.to_vec()),
+            args: Some(event.args.to_vec()),
             uid: None, // TODO: Get user ID
-            euid,
+            euid: event.euid(),
             platform_binary,
         };
 
@@ -763,6 +769,9 @@ impl Monitor {
         let decision = self
             .rule_engine
             .check_access_with_context(&context, &real_protected_path);
+
+        // Read mode once for the entire decision handling
+        let current_mode = *self.mode.read().await;
 
         match decision {
             Decision::Allow(rule_name) => {
@@ -776,9 +785,9 @@ impl Monitor {
                     &prefix,
                     &real_protected_path,
                     "exec",
-                    pid,
-                    ppid,
-                    euid,
+                    event.pid(),
+                    event.ppid(),
+                    event.euid(),
                     &real_process_path,
                 );
                 log::info!("{}", log_msg);
@@ -790,28 +799,64 @@ impl Monitor {
                 }
             }
             Decision::Deny(rule_name) => {
-                match self.mode {
+                match current_mode {
                     Mode::Monitor => {
                         let log_msg = self.build_compact_log_message(
                             &format!("DETECTED[{}]", rule_name),
                             &real_protected_path,
                             "exec",
-                            pid,
-                            ppid,
-                            euid,
+                            event.pid(),
+                            event.ppid(),
+                            event.euid(),
                             &real_process_path,
                         );
                         log::warn!("{}", log_msg);
+
+                        // Send event to IPC server for UI notification
+                        if let Some(pid) = event.pid() {
+                            // Build command line from args
+                            let cmdline = if event.args.is_empty() {
+                                real_process_path.display().to_string()
+                            } else {
+                                format!("{} {}", real_process_path.display(), event.args.join(" "))
+                            };
+
+                            let process_tree = self.build_process_tree_for_event(pid, 5);
+
+                            let event = Event {
+                                id: IpcServer::generate_event_id(),
+                                timestamp: chrono::Utc::now(),
+                                event_type: EventType::AccessDenied {
+                                    rule_name: rule_name.clone(),
+                                    file_path: real_protected_path.display().to_string(),
+                                    process_path: real_process_path.display().to_string(),
+                                    process_pid: pid,
+                                    process_cmdline: Some(cmdline),
+                                    process_euid: event.euid(),
+                                    parent_pid: event.ppid(),
+                                    team_id: team_id.clone(),
+                                    action: "detected".to_string(),
+                                    process_tree: Some(process_tree),
+                                },
+                            };
+
+                            let ipc_server = Arc::clone(&self.ipc_server);
+                            tokio::spawn(async move {
+                                if let Err(e) = ipc_server.add_event(event).await {
+                                    log::warn!("Failed to send event to IPC server: {} (UI may not receive notification)", e);
+                                }
+                            });
+                        }
                     }
                     Mode::Enforce => {
                         #[cfg(target_os = "macos")]
-                        if let Some(pid) = pid {
+                        if let Some(pid) = event.pid() {
                             // Suspend the process immediately
                             let stopped = self.suspend_process(pid);
 
                             // Always try to suspend parent if requested, even if child already exited
                             let (parent_stopped, _parent_cmdline) = if self.stop_parent {
-                                if let Some(ppid) = ppid {
+                                if let Some(ppid) = event.ppid() {
                                     if ppid > 1 {
                                         if self.suspend_process(ppid) {
                                             let parent_cmd = self.get_process_cmdline(ppid);
@@ -852,7 +897,8 @@ impl Monitor {
                                 );
 
                                 // Log the process tree
-                                let tree = self.build_process_tree_string(Some(pid), ppid, 3);
+                                let tree =
+                                    self.build_process_tree_string(Some(pid), event.ppid(), 3);
                                 for line in tree {
                                     log::error!("{}", line);
                                 }
@@ -865,7 +911,7 @@ impl Monitor {
                             } else {
                                 // Process exited but try to stop parent anyway
                                 let parent_stopped = if self.stop_parent {
-                                    if let Some(ppid) = ppid {
+                                    if let Some(ppid) = event.ppid() {
                                         if ppid > 1 {
                                             if self.suspend_process(ppid) {
                                                 let parent_cmd = self.get_process_cmdline(ppid);
@@ -908,7 +954,8 @@ impl Monitor {
                                 );
 
                                 // Log the process tree
-                                let tree = self.build_process_tree_string(Some(pid), ppid, 3);
+                                let tree =
+                                    self.build_process_tree_string(Some(pid), event.ppid(), 3);
                                 for line in tree {
                                     log::error!("{}", line);
                                 }
@@ -926,15 +973,15 @@ impl Monitor {
                     Mode::Interactive => {
                         // Similar to open, but for exec
                         #[cfg(target_os = "macos")]
-                        if let Some(pid) = pid {
+                        if let Some(pid) = event.pid() {
                             if self.suspend_process(pid) {
                                 let mut log_msg = self.build_compact_log_message(
                                     "SUSPENDED",
                                     &real_protected_path,
                                     "exec",
                                     Some(pid),
-                                    ppid,
-                                    euid,
+                                    event.ppid(),
+                                    event.euid(),
                                     &real_process_path,
                                 );
                                 log_msg.push_str(" (waiting for user)");
@@ -946,12 +993,12 @@ impl Monitor {
                             .handle_interactive_prompt_with_pid(
                                 &real_process_path,
                                 &real_protected_path,
-                                pid,
+                                event.pid(),
                             )
                             .await?;
 
                         #[cfg(target_os = "macos")]
-                        if let Some(pid) = pid {
+                        if let Some(pid) = event.pid() {
                             if _allow {
                                 self.resume_process(pid);
                                 let mut log_msg = self.build_compact_log_message(
@@ -959,8 +1006,8 @@ impl Monitor {
                                     &real_protected_path,
                                     "exec",
                                     Some(pid),
-                                    ppid,
-                                    euid,
+                                    event.ppid(),
+                                    event.euid(),
                                     &real_process_path,
                                 );
                                 log_msg.push_str(" (user allowed)");
@@ -971,8 +1018,8 @@ impl Monitor {
                                     &real_protected_path,
                                     "exec",
                                     Some(pid),
-                                    ppid,
-                                    euid,
+                                    event.ppid(),
+                                    event.euid(),
                                     &real_process_path,
                                 );
                                 log_msg.push_str(" (user denied)");
@@ -1061,6 +1108,9 @@ impl Monitor {
             .rule_engine
             .check_access_with_context(&context, &real_file_path);
 
+        // Read mode once for the entire decision handling
+        let current_mode = *self.mode.read().await;
+
         match decision {
             Decision::Allow(rule_name) => {
                 // This is a protected file that was allowed access - log it
@@ -1125,7 +1175,7 @@ impl Monitor {
                         "open",
                         process,
                         parent,
-                        &self.mode.to_string(),
+                        &current_mode.to_string(),
                     );
 
                     if let Err(e) = self.json_logger.log_event(&event) {
@@ -1169,7 +1219,7 @@ impl Monitor {
                     // Collect 5 levels of process tree for deny events
                     let process_tree = self.collect_process_tree(ppid, 5);
 
-                    let action_taken = match self.mode {
+                    let action_taken = match current_mode {
                         Mode::Monitor => "logged",
                         Mode::Enforce => "blocked",
                         Mode::Interactive => "prompted",
@@ -1181,7 +1231,7 @@ impl Monitor {
                         "open",
                         process,
                         process_tree,
-                        &self.mode.to_string(),
+                        &current_mode.to_string(),
                         action_taken,
                     );
 
@@ -1191,6 +1241,8 @@ impl Monitor {
 
                     // Send event to IPC server
                     let event_id = IpcServer::generate_event_id();
+                    let process_tree = self.build_process_tree_for_event(p, 5);
+
                     let ipc_event = Event {
                         id: event_id.clone(),
                         timestamp: chrono::Utc::now(),
@@ -1204,6 +1256,7 @@ impl Monitor {
                             parent_pid: ppid,
                             team_id: self.process_cache.get(&p).and_then(|e| e.team_id.clone()),
                             action: action_taken.to_string(),
+                            process_tree: Some(process_tree),
                         },
                     };
 
@@ -1215,7 +1268,7 @@ impl Monitor {
                     });
 
                     // Register suspended process if in enforce mode
-                    if matches!(self.mode, Mode::Enforce) {
+                    if matches!(*self.mode.read().await, Mode::Enforce) {
                         let suspended = SuspendedProcess {
                             pid: p,
                             ppid,
@@ -1237,7 +1290,7 @@ impl Monitor {
                     }
                 }
 
-                match self.mode {
+                match current_mode {
                     Mode::Monitor => {
                         let log_msg = self.build_compact_log_message(
                             &format!("DETECTED[{}]", rule_name),
@@ -1731,6 +1784,7 @@ impl Monitor {
     }
 
     // Helper function to build compact log message format
+    #[allow(clippy::too_many_arguments)]
     fn build_compact_log_message(
         &self,
         decision: &str,
@@ -2160,6 +2214,162 @@ impl Monitor {
     }
 
     #[cfg(target_os = "macos")]
+    fn build_process_tree_for_event(&self, pid: u32, max_depth: usize) -> Vec<ProcessTreeEntry> {
+        let mut tree = Vec::new();
+        let mut current_pid = Some(pid);
+        let mut depth = 0;
+
+        while let Some(p) = current_pid {
+            if depth >= max_depth || p <= 1 {
+                break;
+            }
+
+            // Get process info from cache or via ps
+            let (name, path, cmdline, ppid, team_id, signing_id) =
+                if let Some(info) = self.process_cache.get(&p) {
+                    // Use cached info
+                    let name = info
+                        .path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("unknown")
+                        .to_string();
+                    (
+                        name,
+                        info.path.display().to_string(),
+                        Some(info.command_line.clone()),
+                        info.ppid,
+                        info.team_id.clone(),
+                        info.signing_id.clone(),
+                    )
+                } else {
+                    // Get info via ps
+                    let cmdline = self.get_process_cmdline(p);
+
+                    // Extract name and path from cmdline
+                    let (name, path) = if let Some(ref cmd) = cmdline {
+                        let first_arg = cmd.split_whitespace().next().unwrap_or("unknown");
+                        let name = std::path::Path::new(first_arg)
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("unknown")
+                            .to_string();
+                        (name, first_arg.to_string())
+                    } else {
+                        ("unknown".to_string(), "".to_string())
+                    };
+
+                    // Get parent PID via ps
+                    let ppid = std::process::Command::new("ps")
+                        .args(["-o", "ppid=", "-p", &p.to_string()])
+                        .output()
+                        .ok()
+                        .and_then(|output| {
+                            String::from_utf8_lossy(&output.stdout)
+                                .trim()
+                                .parse::<u32>()
+                                .ok()
+                        });
+
+                    (name, path, cmdline, ppid, None, None)
+                };
+
+            // Extract vendor name if we have a team_id
+            let vendor_name = if team_id.is_some() && !path.is_empty() {
+                self.get_vendor_name(&path)
+            } else {
+                None
+            };
+
+            tree.push(ProcessTreeEntry {
+                pid: p,
+                ppid,
+                name,
+                path,
+                cmdline,
+                team_id,
+                signing_id,
+                vendor_name,
+            });
+
+            current_pid = ppid;
+            depth += 1;
+        }
+
+        tree
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn build_process_tree_for_event(&self, _pid: u32, _max_depth: usize) -> Vec<ProcessTreeEntry> {
+        // TODO: Implement for Linux/BSD
+        Vec::new()
+    }
+
+    #[cfg(target_os = "macos")]
+    fn get_vendor_name(&self, path: &str) -> Option<String> {
+        use std::process::Command;
+
+        // Try to run codesign to get the Authority information
+        match Command::new("codesign").args(["-dvvv", path]).output() {
+            Ok(output) => {
+                // codesign writes to stderr, not stdout
+                let output_str = String::from_utf8_lossy(&output.stderr);
+
+                // Look for the first Authority line which contains the vendor name
+                // Format: "Authority=Developer ID Application: Mozilla Corporation (43AQ936H96)"
+                for line in output_str.lines() {
+                    if line.starts_with("Authority=Developer ID Application: ") {
+                        // Extract vendor name between ": " and " ("
+                        if let Some(start) = line.find(": ") {
+                            let vendor_part = &line[start + 2..];
+                            if let Some(end) = vendor_part.find(" (") {
+                                let vendor = vendor_part[..end].trim().to_string();
+
+                                // Also extract team ID and cache it
+                                if let Some(team_start) = vendor_part.find("(") {
+                                    if let Some(team_end) = vendor_part.find(")") {
+                                        let team_id =
+                                            vendor_part[team_start + 1..team_end].to_string();
+                                        if let Ok(mut cache) = self.vendor_cache.lock() {
+                                            cache.insert(team_id.clone(), Some(vendor.clone()));
+                                            log::debug!(
+                                                "Cached vendor '{}' for team ID '{}'",
+                                                vendor,
+                                                team_id
+                                            );
+                                        }
+                                    }
+                                }
+
+                                return Some(vendor);
+                            }
+                        }
+                    } else if line.starts_with("Authority=") && line.contains("Apple") {
+                        // This is an Apple system binary
+                        return Some("Apple".to_string());
+                    }
+                }
+
+                // If we didn't find a vendor name, check if it's unsigned
+                if output_str.contains("code object is not signed at all") {
+                    return None;
+                }
+
+                // Check for ad-hoc signing
+                if output_str.contains("Signature=adhoc") {
+                    return Some("Ad-hoc Signed".to_string());
+                }
+
+                None
+            }
+            Err(e) => {
+                log::debug!("Failed to run codesign for '{}': {}", path, e);
+                None
+            }
+        }
+    }
+
+    #[cfg(target_os = "macos")]
     fn get_process_cmdline(&self, pid: u32) -> Option<String> {
         use std::process::Command;
 
@@ -2393,8 +2603,7 @@ impl Monitor {
         log::info!("Using fanotify mechanism");
 
         // Use the Linux-specific monitor implementation
-        let mut linux_monitor =
-            LinuxMonitor::new(self.mode.clone(), self.verbose, self.stop_parent)?;
+        let mut linux_monitor = LinuxMonitor::new(Mode::Monitor, self.verbose, self.stop_parent)?; // TODO: pass shared mode
         linux_monitor.start().await
     }
 
@@ -2409,7 +2618,7 @@ impl Monitor {
     async fn monitor_with_dtrace(&mut self) -> Result<()> {
         log::info!("Using DTrace mechanism for FreeBSD");
 
-        let mut monitor = FreeBSDMonitor::new(self.mode, self.verbose, self.stop_parent);
+        let mut monitor = FreeBSDMonitor::new(Mode::Monitor, self.verbose, self.stop_parent); // TODO: pass shared mode
         monitor.start().await
     }
 

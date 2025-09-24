@@ -1,5 +1,6 @@
 [workspace]
-members = ["agent", "ui"]
+members = ["agent"]
+exclude = ["ui-tauri", "ui"]
 resolver = "2"
 
 [workspace.dependencies]

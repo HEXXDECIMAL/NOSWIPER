@@ -31,13 +31,13 @@ const FAN_CLOEXEC: u32 = 0x00000001;
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct FanotifyEventMetadata {
-    pub event_len: u32,      // Total length of this event metadata
-    pub vers: u8,             // Version (FANOTIFY_METADATA_VERSION)
-    pub reserved: u8,         // Reserved, should be 0
-    pub metadata_len: u16,    // Length of this structure (should be 24)
-    pub mask: u64,           // Event mask
-    pub fd: i32,             // File descriptor of the accessed file
-    pub pid: i32,            // PID of the accessing process
+    pub event_len: u32,    // Total length of this event metadata
+    pub vers: u8,          // Version (FANOTIFY_METADATA_VERSION)
+    pub reserved: u8,      // Reserved, should be 0
+    pub metadata_len: u16, // Length of this structure (should be 24)
+    pub mask: u64,         // Event mask
+    pub fd: i32,           // File descriptor of the accessed file
+    pub pid: i32,          // PID of the accessing process
 }
 
 // Fanotify response structure
@@ -63,7 +63,7 @@ pub struct LinuxMonitor {
 impl LinuxMonitor {
     pub fn new(mode: Mode, verbose: bool, stop_parent: bool) -> Result<Self> {
         // Load config from embedded YAML
-        let config = Config::default()
+        let config = Config::load_default()
             .map_err(|e| anyhow::anyhow!("Failed to load default config: {}", e))?;
 
         Ok(Self {
@@ -85,7 +85,10 @@ impl LinuxMonitor {
         log::debug!("Expanding patterns for {} users", users.len());
 
         let protected_files_count = self.rule_engine.config.protected_files.len();
-        log::debug!("Configuration has {} protected file groups", protected_files_count);
+        log::debug!(
+            "Configuration has {} protected file groups",
+            protected_files_count
+        );
 
         // Process each protected file pattern from the YAML configuration
         for protected_file in &self.rule_engine.config.protected_files {
@@ -96,7 +99,11 @@ impl LinuxMonitor {
                 // For each pattern, expand it for all users and find matching files
                 let expanded_paths = self.expand_pattern_for_users(&pattern_str, &users);
                 if !expanded_paths.is_empty() {
-                    log::debug!("Pattern '{}' matched {} files", pattern_str, expanded_paths.len());
+                    log::debug!(
+                        "Pattern '{}' matched {} files",
+                        pattern_str,
+                        expanded_paths.len()
+                    );
                     for path in &expanded_paths {
                         log::debug!("  - {}", path.display());
                     }
@@ -119,11 +126,19 @@ impl LinuxMonitor {
 
         // If pattern starts with ~, expand for each user
         if pattern.starts_with('~') {
-            log::debug!("Expanding ~ pattern '{}' for {} users", pattern, users.len());
+            log::debug!(
+                "Expanding ~ pattern '{}' for {} users",
+                pattern,
+                users.len()
+            );
             for user_home in users {
                 // Skip problematic home directories
                 let home_str = user_home.to_string_lossy();
-                if home_str == "/" || home_str == "/bin" || home_str == "/sbin" || home_str == "/usr/games" {
+                if home_str == "/"
+                    || home_str == "/bin"
+                    || home_str == "/sbin"
+                    || home_str == "/usr/games"
+                {
                     log::debug!("  Skipping system path: {}", home_str);
                     continue;
                 }
@@ -139,8 +154,11 @@ impl LinuxMonitor {
 
                 let found = self.glob_pattern(&expanded_pattern);
                 if !found.is_empty() {
-                    log::info!("    User {}: found {} files",
-                        user_home.display(), found.len());
+                    log::info!(
+                        "    User {}: found {} files",
+                        user_home.display(),
+                        found.len()
+                    );
                 }
                 paths.extend(found);
             }
@@ -178,14 +196,22 @@ impl LinuxMonitor {
                 for entry in entries {
                     count += 1;
                     if count > MAX_GLOB_RESULTS {
-                        log::warn!("  Pattern {} matched too many files (>{} ), stopping", pattern, MAX_GLOB_RESULTS);
+                        log::warn!(
+                            "  Pattern {} matched too many files (>{} ), stopping",
+                            pattern,
+                            MAX_GLOB_RESULTS
+                        );
                         break;
                     }
 
                     match entry {
                         Ok(path) => {
-                            log::debug!("  Glob found path: {} (is_file: {}, exists: {})",
-                                path.display(), path.is_file(), path.exists());
+                            log::debug!(
+                                "  Glob found path: {} (is_file: {}, exists: {})",
+                                path.display(),
+                                path.is_file(),
+                                path.exists()
+                            );
                             if path.is_file() {
                                 results.push(path);
                             }
@@ -505,7 +531,7 @@ impl LinuxMonitor {
                     mode: Mode::Monitor, // Doesn't matter for discovery
                     verbose: false,
                     stop_parent: false,
-                    fanotify_fd: None,  // Don't give ownership of the fd!
+                    fanotify_fd: None, // Don't give ownership of the fd!
                     watched_paths: Arc::clone(&watched_paths),
                     pid_cache: HashMap::new(),
                 };
@@ -568,7 +594,10 @@ impl LinuxMonitor {
 
         let mut buffer = vec![0u8; 8192];
 
-        log::info!("Starting fanotify monitor loop, watching for events on fd {}", fd);
+        log::info!(
+            "Starting fanotify monitor loop, watching for events on fd {}",
+            fd
+        );
 
         loop {
             // Read events from fanotify
@@ -591,20 +620,22 @@ impl LinuxMonitor {
 
             // Always dump the raw bytes for debugging
             if len > 0 && len <= 100 {
-                let hex: Vec<String> = buffer[..len as usize].iter()
+                let hex: Vec<String> = buffer[..len as usize]
+                    .iter()
                     .map(|b| format!("{:02x}", b))
                     .collect();
                 log::info!("Raw event data: {}", hex.join(" "));
 
                 // Manually parse the first event for debugging
                 if len >= 24 {
-                    let event_len = u32::from_ne_bytes([buffer[0], buffer[1], buffer[2], buffer[3]]);
+                    let event_len =
+                        u32::from_ne_bytes([buffer[0], buffer[1], buffer[2], buffer[3]]);
                     let vers = buffer[4];
                     let _reserved = buffer[5];
                     let metadata_len = u16::from_ne_bytes([buffer[6], buffer[7]]);
                     let mask = u64::from_ne_bytes([
-                        buffer[8], buffer[9], buffer[10], buffer[11],
-                        buffer[12], buffer[13], buffer[14], buffer[15]
+                        buffer[8], buffer[9], buffer[10], buffer[11], buffer[12], buffer[13],
+                        buffer[14], buffer[15],
                     ]);
                     let fd = i32::from_ne_bytes([buffer[16], buffer[17], buffer[18], buffer[19]]);
                     let pid = i32::from_ne_bytes([buffer[20], buffer[21], buffer[22], buffer[23]]);
@@ -625,12 +656,19 @@ impl LinuxMonitor {
                 let metadata =
                     unsafe { &*(buffer.as_ptr().add(offset) as *const FanotifyEventMetadata) };
 
-                log::debug!("Reading event at offset {}: vers={}, event_len={}",
-                    offset, metadata.vers, metadata.event_len);
+                log::debug!(
+                    "Reading event at offset {}: vers={}, event_len={}",
+                    offset,
+                    metadata.vers,
+                    metadata.event_len
+                );
 
                 if metadata.vers != libc::FANOTIFY_METADATA_VERSION as u8 {
-                    log::warn!("Unsupported fanotify metadata version: {} (expected {})",
-                        metadata.vers, libc::FANOTIFY_METADATA_VERSION);
+                    log::warn!(
+                        "Unsupported fanotify metadata version: {} (expected {})",
+                        metadata.vers,
+                        libc::FANOTIFY_METADATA_VERSION
+                    );
                     break;
                 }
 
@@ -672,8 +710,12 @@ impl LinuxMonitor {
     }
 
     async fn handle_event(&mut self, metadata: &FanotifyEventMetadata) -> Result<()> {
-        log::info!("Handling fanotify event for PID {} (mask: 0x{:x}, fd={})",
-            metadata.pid, metadata.mask, metadata.fd);
+        log::info!(
+            "Handling fanotify event for PID {} (mask: 0x{:x}, fd={})",
+            metadata.pid,
+            metadata.mask,
+            metadata.fd
+        );
 
         // Sanity check - event fd should not be the same as fanotify fd
         if let Some(fanotify_fd) = self.fanotify_fd {
@@ -701,7 +743,11 @@ impl LinuxMonitor {
             Ok(path) => path,
             Err(e) => {
                 // Process may have already exited - this is normal for short-lived processes
-                log::warn!("Process PID {} already exited, allowing access: {}", metadata.pid, e);
+                log::warn!(
+                    "Process PID {} already exited, allowing access: {}",
+                    metadata.pid,
+                    e
+                );
                 // IMPORTANT: Must respond BEFORE closing the fd
                 self.respond_to_event(metadata.fd, FAN_ALLOW)?;
                 unsafe { libc::close(metadata.fd) };
@@ -724,7 +770,9 @@ impl LinuxMonitor {
         let ppid = Self::get_parent_pid(metadata.pid).map(|p| p as u32);
 
         // Get UID/EUID from /proc
-        let (uid, euid) = if let Ok(status) = std::fs::read_to_string(&format!("/proc/{}/status", metadata.pid)) {
+        let (uid, euid) = if let Ok(status) =
+            std::fs::read_to_string(&format!("/proc/{}/status", metadata.pid))
+        {
             let mut real_uid = None;
             let mut eff_uid = None;
             for line in status.lines() {
@@ -743,8 +791,16 @@ impl LinuxMonitor {
         };
 
         // Get command-line arguments
-        let args = if let Ok(cmdline) = std::fs::read_to_string(&format!("/proc/{}/cmdline", metadata.pid)) {
-            Some(cmdline.split('\0').filter(|s| !s.is_empty()).map(String::from).collect())
+        let args = if let Ok(cmdline) =
+            std::fs::read_to_string(&format!("/proc/{}/cmdline", metadata.pid))
+        {
+            Some(
+                cmdline
+                    .split('\0')
+                    .filter(|s| !s.is_empty())
+                    .map(String::from)
+                    .collect(),
+            )
         } else {
             None
         };
@@ -802,7 +858,8 @@ impl LinuxMonitor {
                         // Try to suspend parent if requested
                         let parent_stopped = if self.stop_parent {
                             if let Some(ppid) = ppid {
-                                if ppid > 1 {  // Don't try to stop init
+                                if ppid > 1 {
+                                    // Don't try to stop init
                                     if self.suspend_process(ppid as i32) {
                                         log::info!("Stopped parent process (PID {})", ppid);
                                         true
@@ -826,10 +883,12 @@ impl LinuxMonitor {
                         );
 
                         if stopped {
-                            log_msg.push_str(&format!("\n  Process SUSPENDED (PID {})", metadata.pid));
+                            log_msg
+                                .push_str(&format!("\n  Process SUSPENDED (PID {})", metadata.pid));
                         }
                         if parent_stopped {
-                            log_msg.push_str(&format!("\n  Parent SUSPENDED (PID {})", ppid.unwrap()));
+                            log_msg
+                                .push_str(&format!("\n  Parent SUSPENDED (PID {})", ppid.unwrap()));
                         }
 
                         log_msg.push_str(&format!("\nProcess tree:\n{}", detailed_tree));
@@ -980,7 +1039,8 @@ impl LinuxMonitor {
 
             // Get UID
             let uid = if let Ok(status) = std::fs::read_to_string(&format!("/proc/{}/status", p)) {
-                status.lines()
+                status
+                    .lines()
                     .find(|line| line.starts_with("Uid:"))
                     .and_then(|line| {
                         let parts: Vec<&str> = line.split_whitespace().collect();
@@ -1073,8 +1133,16 @@ impl LinuxMonitor {
             .fanotify_fd
             .ok_or_else(|| anyhow::anyhow!("Fanotify not initialized"))?;
 
-        log::debug!("Responding to fanotify: event_fd={}, response={}, fanotify_fd={}",
-            fd, if response == FAN_ALLOW { "ALLOW" } else { "DENY" }, fanotify_fd);
+        log::debug!(
+            "Responding to fanotify: event_fd={}, response={}, fanotify_fd={}",
+            fd,
+            if response == FAN_ALLOW {
+                "ALLOW"
+            } else {
+                "DENY"
+            },
+            fanotify_fd
+        );
 
         let response = FanotifyResponse { fd, response };
 
@@ -1088,12 +1156,14 @@ impl LinuxMonitor {
 
         if ret < 0 {
             let err = io::Error::last_os_error();
-            log::error!("Failed to write response: ret={}, err={}, fanotify_fd={}, event_fd={}",
-                ret, err, fanotify_fd, fd);
-            return Err(anyhow::anyhow!(
-                "Failed to send fanotify response: {}",
-                err
-            ));
+            log::error!(
+                "Failed to write response: ret={}, err={}, fanotify_fd={}, event_fd={}",
+                ret,
+                err,
+                fanotify_fd,
+                fd
+            );
+            return Err(anyhow::anyhow!("Failed to send fanotify response: {}", err));
         }
 
         log::debug!("Successfully sent fanotify response");

@@ -4,8 +4,12 @@ version = "0.1.0"
 edition = "2021"
 
 [lints.rust]
+warnings = "deny"  # Treat all warnings as errors
 unsafe_code = "deny"
 missing_docs = "warn"
+deprecated = "deny"
+dead_code = "deny"
+unused = "deny"
 
 [lints.clippy]
 all = "warn"
@@ -19,6 +23,9 @@ expect_used = "warn"
 tray-icon = "0.19"
 winit = "0.30"  # Required for tray-icon event loop
 image = "0.25"  # For creating icon from text
+rfd = "0.15"  # Native file dialogs
+egui = "0.29"
+eframe = "0.29"  # egui framework for native apps
 serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }

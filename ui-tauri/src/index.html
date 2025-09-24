@@ -1,0 +1,779 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Security Alert</title>
+        <style>
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+
+            body {
+                font-family:
+                    -apple-system, BlinkMacSystemFont, "SF Pro Text",
+                    "Helvetica Neue", sans-serif;
+                background: transparent; /* No backdrop for native look */
+                color: #1d1d1f;
+                height: 100vh;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                -webkit-font-smoothing: antialiased;
+                -moz-osx-font-smoothing: grayscale;
+                font-size: 13px;
+                line-height: 1.4;
+            }
+
+            .container {
+                background: #f6f6f6; /* macOS window background */
+                border-radius: 10px;
+                padding: 0;
+                box-shadow:
+                    0 22px 70px rgba(0, 0, 0, 0.3),
+                    0 10px 20px rgba(0, 0, 0, 0.15);
+                width: 90%;
+                max-width: 500px;
+                overflow: hidden;
+            }
+
+            .header {
+                background: linear-gradient(180deg, #ffffff 0%, #f9f9f9 100%);
+                padding: 20px 20px 16px 20px;
+                border-bottom: 1px solid #d1d1d1;
+                display: flex;
+                align-items: flex-start;
+            }
+
+            .header-icon {
+                width: 56px;
+                height: 56px;
+                margin-right: 16px;
+                flex-shrink: 0;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+
+            /* Shield icon SVG */
+            .shield-icon {
+                width: 56px;
+                height: 56px;
+            }
+
+            .header-text h1 {
+                font-size: 14px;
+                font-weight: 600;
+                color: #000000;
+                margin-bottom: 4px;
+                letter-spacing: -0.01em;
+            }
+
+            .header-text p {
+                font-size: 11px;
+                color: #86868b;
+                line-height: 1.5;
+            }
+
+            .content-area {
+                background: #ffffff;
+                padding: 16px 20px;
+            }
+
+            .violation-details {
+                margin: 0;
+            }
+
+            .detail-row {
+                display: flex;
+                margin: 8px 0;
+                font-size: 11px;
+            }
+
+            .detail-label {
+                font-weight: 500;
+                color: #86868b;
+                min-width: 90px;
+                text-align: right;
+                margin-right: 12px;
+            }
+
+            .detail-value {
+                color: #1d1d1f;
+                word-break: break-all;
+                font-family: "SF Mono", Monaco, "Courier New", monospace;
+                font-size: 11px;
+            }
+
+            .process-tree {
+                background: #f9f9f9;
+                border: 1px solid #e5e5e7;
+                border-radius: 6px;
+                padding: 12px;
+                margin: 16px 0;
+                font-family: "SF Mono", Monaco, "Courier New", monospace;
+                font-size: 10px;
+                max-height: 140px; /* Allow more height for process tree */
+                overflow-y: auto;
+                color: #48484a;
+            }
+
+            .process-tree-title {
+                font-weight: 500;
+                margin-bottom: 8px;
+                font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text";
+                font-size: 11px;
+                color: #86868b;
+            }
+
+            .tree-entry {
+                margin: 2px 0;
+                white-space: pre;
+                line-height: 1.3;
+            }
+
+            .actions {
+                background: linear-gradient(180deg, #fafafa 0%, #f0f0f0 100%);
+                border-top: 1px solid #d1d1d1;
+                padding: 12px 20px;
+                display: flex;
+                justify-content: flex-end;
+                gap: 8px;
+            }
+
+            .btn {
+                padding: 6px 16px;
+                border: 1px solid #d1d1d1;
+                border-radius: 6px;
+                font-size: 13px;
+                font-weight: 400;
+                cursor: pointer;
+                transition: all 0.15s;
+                font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text";
+                background: linear-gradient(180deg, #ffffff 0%, #f5f5f5 100%);
+                color: #000000;
+                min-width: 72px;
+                text-align: center;
+            }
+
+            .btn:hover {
+                background: linear-gradient(180deg, #f8f8f8 0%, #e8e8e8 100%);
+                box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            }
+
+            .btn:active {
+                background: linear-gradient(180deg, #e8e8e8 0%, #d8d8d8 100%);
+                box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.1);
+            }
+
+            /* Primary action button (blue like macOS) */
+            .btn-primary {
+                background: linear-gradient(180deg, #007aff 0%, #0051d5 100%);
+                border-color: #0051d5;
+                color: white;
+            }
+
+            .btn-primary:hover {
+                background: linear-gradient(180deg, #0070f5 0%, #0048c5 100%);
+            }
+
+            .btn-primary:active {
+                background: linear-gradient(180deg, #0060e0 0%, #0040b0 100%);
+            }
+
+            /* Destructive action (red) */
+            .btn-danger {
+                color: #ff3b30;
+            }
+
+            .btn-danger:hover {
+                background: linear-gradient(180deg, #fff0f0 0%, #ffe0e0 100%);
+                border-color: #ff3b30;
+            }
+
+            .loading {
+                display: none;
+                text-align: center;
+                padding: 40px 20px;
+                background: white;
+            }
+
+            .spinner {
+                border: 2px solid #e5e5e7;
+                border-top: 2px solid #007aff;
+                border-radius: 50%;
+                width: 32px;
+                height: 32px;
+                animation: spin 0.8s linear infinite;
+                margin: 0 auto;
+            }
+
+            @keyframes spin {
+                0% {
+                    transform: rotate(0deg);
+                }
+                100% {
+                    transform: rotate(360deg);
+                }
+            }
+
+            /* Hide scrollbar but keep functionality */
+            .process-tree::-webkit-scrollbar {
+                width: 6px;
+            }
+
+            .process-tree::-webkit-scrollbar-track {
+                background: transparent;
+            }
+
+            .process-tree::-webkit-scrollbar-thumb {
+                background: #c7c7cc;
+                border-radius: 3px;
+            }
+
+            .process-tree::-webkit-scrollbar-thumb:hover {
+                background: #aeaeb2;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="loading" id="loading">
+                <div class="spinner"></div>
+                <p style="margin-top: 12px; color: #86868b; font-size: 13px">
+                    Processing...
+                </p>
+            </div>
+
+            <div id="content">
+                <div class="header">
+                    <div class="header-icon">
+                        <!-- macOS-style shield icon -->
+                        <svg
+                            class="shield-icon"
+                            viewBox="0 0 56 56"
+                            fill="none"
+                            xmlns="http://www.w3.org/2000/svg"
+                        >
+                            <path
+                                d="M28 4C28 4 12 8 12 8V28C12 40 20 48 28 52C36 48 44 40 44 28V8C44 8 28 4 28 4Z"
+                                fill="#FF9500"
+                                stroke="#FF7A00"
+                                stroke-width="1.5"
+                            />
+                            <path
+                                d="M28 18L28 38M20 28L36 28"
+                                stroke="white"
+                                stroke-width="3"
+                                stroke-linecap="round"
+                            />
+                        </svg>
+                    </div>
+                    <div class="header-text">
+                        <h1>Unexpected access to private credentials</h1>
+                        <p>
+                            A process is attempting to access protected files on
+                            your Mac.
+                        </p>
+                    </div>
+                </div>
+
+                <div class="content-area">
+                    <div class="violation-details">
+                        <div class="detail-row">
+                            <span class="detail-label">Process:</span>
+                            <span class="detail-value" id="process-path"
+                                >Loading...</span
+                            >
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Process ID:</span>
+                            <span class="detail-value" id="process-pid">-</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Protected File:</span>
+                            <span class="detail-value" id="file-path"
+                                >Loading...</span
+                            >
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Security Rule:</span>
+                            <span class="detail-value" id="rule-name"
+                                >Loading...</span
+                            >
+                        </div>
+                        <div
+                            class="detail-row"
+                            id="team-id-row"
+                            style="display: none"
+                        >
+                            <span class="detail-label">Developer ID:</span>
+                            <span class="detail-value" id="team-id">-</span>
+                        </div>
+                    </div>
+
+                    <div class="process-tree">
+                        <div class="process-tree-title">Process Hierarchy</div>
+                        <div id="tree-content">Loading process tree...</div>
+                    </div>
+                </div>
+
+                <div class="actions" id="action-buttons">
+                    <!-- Buttons will be dynamically generated based on mode -->
+                </div>
+            </div>
+        </div>
+
+        <script>
+            // Initialize Tauri APIs only if available
+            let invoke, listen, appWindow;
+
+            if (window.__TAURI__) {
+                console.log(
+                    "[NoSwiper UI] Tauri APIs detected, initializing...",
+                );
+                console.log(
+                    "[NoSwiper UI] Tauri object structure:",
+                    Object.keys(window.__TAURI__),
+                );
+
+                // Tauri v2 API structure
+                if (window.__TAURI__.core && window.__TAURI__.core.invoke) {
+                    invoke = window.__TAURI__.core.invoke;
+                    console.log(
+                        "[NoSwiper UI] invoke initialized from core.invoke",
+                    );
+                } else if (
+                    window.__TAURI__.tauri &&
+                    window.__TAURI__.tauri.invoke
+                ) {
+                    invoke = window.__TAURI__.tauri.invoke;
+                    console.log(
+                        "[NoSwiper UI] invoke initialized from tauri.invoke",
+                    );
+                } else if (window.__TAURI__.invoke) {
+                    invoke = window.__TAURI__.invoke;
+                    console.log("[NoSwiper UI] invoke initialized from root");
+                }
+
+                if (window.__TAURI__.event && window.__TAURI__.event.listen) {
+                    listen = window.__TAURI__.event.listen;
+                    console.log("[NoSwiper UI] listen initialized");
+                }
+
+                if (window.__TAURI__.window) {
+                    // Tauri v2 uses getCurrent() instead of appWindow
+                    if (window.__TAURI__.window.getCurrent) {
+                        appWindow = window.__TAURI__.window.getCurrent();
+                        console.log(
+                            "[NoSwiper UI] appWindow initialized using getCurrent()",
+                        );
+                    } else if (window.__TAURI__.window.appWindow) {
+                        appWindow = window.__TAURI__.window.appWindow;
+                        console.log(
+                            "[NoSwiper UI] appWindow initialized using legacy appWindow",
+                        );
+                    }
+                }
+
+                if (!invoke) {
+                    console.error(
+                        "[NoSwiper UI] Failed to initialize invoke function!",
+                    );
+                }
+            } else {
+                console.log(
+                    "[NoSwiper UI] Running in browser mode (no Tauri APIs)",
+                );
+            }
+
+            // Store current event ID globally
+            let currentEventId = null;
+
+            // Listen for violation events
+            if (listen) {
+                listen("violation", (event) => {
+                    console.log(
+                        "[NoSwiper UI] Violation event received:",
+                        event.payload,
+                    );
+                    displayViolation(event.payload);
+                })
+                    .then(() => {
+                        console.log(
+                            "[NoSwiper UI] Successfully registered violation listener",
+                        );
+                    })
+                    .catch((error) => {
+                        console.error(
+                            "[NoSwiper UI] Failed to register violation listener:",
+                            error,
+                        );
+                    });
+            }
+
+            function displayViolation(violation) {
+                console.log("[NoSwiper UI] Displaying violation:", violation);
+
+                // Store the event ID for later actions
+                currentEventId = violation.event_id;
+                console.log("[NoSwiper UI] Event ID stored:", currentEventId);
+
+                // Update violation details
+                const processPath = violation.process_path || "Unknown";
+                const processPid = violation.process_pid || "-";
+                const filePath = violation.file_path || "Unknown";
+                const ruleName = violation.rule_name || "Unknown";
+                const mode = violation.mode || "monitor";
+
+                console.log("[NoSwiper UI] Setting violation details:");
+                console.log("  - Process:", processPath);
+                console.log("  - PID:", processPid);
+                console.log("  - File:", filePath);
+                console.log("  - Rule:", ruleName);
+                console.log("  - Mode:", mode);
+
+                document.getElementById("process-path").textContent =
+                    processPath;
+                document.getElementById("process-pid").textContent = processPid;
+                document.getElementById("file-path").textContent = filePath;
+                document.getElementById("rule-name").textContent = ruleName;
+
+                // Update buttons based on mode
+                const actionButtons = document.getElementById("action-buttons");
+                if (mode === "monitor") {
+                    // In monitor mode: just OK and Add to Allow List
+                    actionButtons.innerHTML = `
+                        <button class="btn" onclick="handleAction('dismiss')">
+                            OK
+                        </button>
+                        <button class="btn btn-primary" onclick="handleAction('allow_permanently')">
+                            Add to Allow List
+                        </button>
+                    `;
+                } else {
+                    // In enforce mode: full set of options
+                    actionButtons.innerHTML = `
+                        <button class="btn btn-danger" onclick="handleAction('kill_process')">
+                            Kill Process
+                        </button>
+                        <button class="btn" onclick="handleAction('allow_permanently')">
+                            Always Allow
+                        </button>
+                        <button class="btn btn-primary" onclick="handleAction('allow_once')">
+                            Allow Once
+                        </button>
+                    `;
+                }
+
+                // Show team ID if present
+                if (violation.team_id) {
+                    console.log(
+                        "[NoSwiper UI] Team ID present:",
+                        violation.team_id,
+                    );
+                    document.getElementById("team-id").textContent =
+                        violation.team_id;
+                    document.getElementById("team-id-row").style.display =
+                        "flex";
+                } else {
+                    document.getElementById("team-id-row").style.display =
+                        "none";
+                }
+
+                // Display process tree
+                if (
+                    violation.process_tree &&
+                    violation.process_tree.length > 0
+                ) {
+                    console.log(
+                        "[NoSwiper UI] Process tree with",
+                        violation.process_tree.length,
+                        "entries",
+                    );
+                    let treeHtml = "";
+                    violation.process_tree.forEach((entry, index) => {
+                        const indent = "  ".repeat(index);
+                        const arrow = index === 0 ? "▶" : "└─";
+                        // Show name, PID, and team ID/signing info if available
+                        let processInfo = `${entry.name} (${entry.pid})`;
+
+                        // Show signing information with priority: team_id > signing_id
+                        if (entry.team_id) {
+                            processInfo += ` <span style="color: #007AFF; font-weight: 500">[${entry.team_id}]</span>`;
+                        } else if (entry.signing_id) {
+                            processInfo += ` <span style="color: #5856D6; font-weight: 500">[${entry.signing_id}]</span>`;
+                        }
+
+                        treeHtml += `<div class="tree-entry">${indent}${arrow} ${processInfo}</div>`;
+
+                        // Show command line if it's reasonable length and not redundant with path
+                        if (
+                            entry.cmdline &&
+                            entry.cmdline.length < 100 &&
+                            !entry.cmdline.endsWith(entry.name)
+                        ) {
+                            treeHtml += `<div class="tree-entry" style="color: #86868b; font-size: 9px;">${indent}   ${entry.cmdline}</div>`;
+                        }
+                    });
+                    document.getElementById("tree-content").innerHTML =
+                        treeHtml;
+                } else {
+                    console.log(
+                        "[NoSwiper UI] No process tree, showing single entry",
+                    );
+                    const processName = processPath.split("/").pop();
+                    let singleEntry = `<div class="tree-entry">▶ ${processName} (${processPid})`;
+
+                    // Show team_id for single entry if available
+                    if (violation.team_id) {
+                        singleEntry += ` <span style="color: #007AFF; font-weight: 500">[${violation.team_id}]</span>`;
+                    }
+                    singleEntry += `</div>`;
+
+                    document.getElementById("tree-content").innerHTML =
+                        singleEntry;
+                }
+            }
+
+            async function handleAction(action) {
+                console.log("[NoSwiper UI] Handle action called:", action);
+
+                if (!currentEventId && action !== "dismiss") {
+                    console.error(
+                        "[NoSwiper UI] No event ID available for action:",
+                        action,
+                    );
+                    console.error(
+                        "[NoSwiper UI] Error: No event ID available - violation event was not received properly",
+                    );
+                    return;
+                }
+
+                // Show loading
+                document.getElementById("loading").style.display = "block";
+                document.getElementById("content").style.display = "none";
+
+                try {
+                    if (action === "dismiss") {
+                        console.log(
+                            "[NoSwiper UI] Dismissing violation window",
+                        );
+                        if (appWindow) {
+                            // Hide the window instead of closing to avoid terminating the app
+                            await appWindow.hide();
+                            // Reset the content
+                            document.getElementById("loading").style.display =
+                                "none";
+                            document.getElementById("content").style.display =
+                                "block";
+                        } else {
+                            console.log(
+                                "[NoSwiper UI] No appWindow available (browser mode)",
+                            );
+                        }
+                        return;
+                    }
+
+                    // Call the appropriate Tauri command with correct parameter name
+                    console.log(
+                        `[NoSwiper UI] Invoking ${action} with event_id:`,
+                        currentEventId,
+                    );
+
+                    if (invoke) {
+                        // Use eventId (camelCase) as the parameter name for Tauri
+                        const response = await invoke(action, {
+                            eventId: currentEventId,
+                        });
+                        console.log(
+                            `[NoSwiper UI] Action ${action} completed:`,
+                            response,
+                        );
+
+                        // Parse response to check if it was successful
+                        let responseObj;
+                        try {
+                            responseObj =
+                                typeof response === "string"
+                                    ? JSON.parse(response)
+                                    : response;
+                        } catch (e) {
+                            responseObj = {
+                                status: "unknown",
+                                message: response,
+                            };
+                        }
+
+                        if (responseObj.status === "success") {
+                            // Close window only if action was successful
+                            setTimeout(async () => {
+                                console.log(
+                                    "[NoSwiper UI] Closing window after successful action",
+                                );
+                                if (appWindow) {
+                                    try {
+                                        await appWindow.close();
+                                        console.log(
+                                            "[NoSwiper UI] Window closed successfully",
+                                        );
+                                        currentEventId = null; // Clear the event ID after successful close
+                                    } catch (closeError) {
+                                        console.error(
+                                            "[NoSwiper UI] Failed to close window:",
+                                            closeError,
+                                        );
+                                        // Try hiding as fallback
+                                        try {
+                                            await appWindow.hide();
+                                            console.log(
+                                                "[NoSwiper UI] Window hidden as fallback",
+                                            );
+                                        } catch (hideError) {
+                                            console.error(
+                                                "[NoSwiper UI] Failed to hide window:",
+                                                hideError,
+                                            );
+                                            // Last resort: reset the UI state
+                                            document.getElementById(
+                                                "loading",
+                                            ).style.display = "none";
+                                            document.getElementById(
+                                                "content",
+                                            ).style.display = "block";
+                                            currentEventId = null;
+                                        }
+                                    }
+                                } else {
+                                    console.warn(
+                                        "[NoSwiper UI] No appWindow available to close",
+                                    );
+                                    // Reset the UI state when no window is available
+                                    document.getElementById(
+                                        "loading",
+                                    ).style.display = "none";
+                                    document.getElementById(
+                                        "content",
+                                    ).style.display = "block";
+                                    currentEventId = null;
+                                }
+                            }, 500);
+                        } else {
+                            // Show error message and return to normal view
+                            console.error(
+                                `[NoSwiper UI] Action failed: ${responseObj.message || "Unknown error"}`,
+                            );
+
+                            // Show error to user
+                            const errorDiv = document.createElement("div");
+                            errorDiv.style.cssText =
+                                "background: #ff3b3015; color: #FF3B30; padding: 8px 12px; border-radius: 6px; margin: 10px 20px; font-size: 12px; border: 1px solid #FF3B3025;";
+                            errorDiv.textContent =
+                                responseObj.message ||
+                                "Action failed. Please try again.";
+                            document
+                                .querySelector(".content-area")
+                                .insertBefore(
+                                    errorDiv,
+                                    document.querySelector(".process-tree"),
+                                );
+
+                            // Show content again after error
+                            document.getElementById("loading").style.display =
+                                "none";
+                            document.getElementById("content").style.display =
+                                "block";
+
+                            // Remove error message after 5 seconds
+                            setTimeout(() => errorDiv.remove(), 5000);
+                        }
+                    } else {
+                        console.log(
+                            "[NoSwiper UI] No invoke function available (browser mode)",
+                        );
+                    }
+                } catch (error) {
+                    console.error(
+                        `[NoSwiper UI] Failed to execute ${action}:`,
+                        error,
+                    );
+
+                    // Show error message to user
+                    const errorDiv = document.createElement("div");
+                    errorDiv.style.cssText =
+                        "background: #ff3b3015; color: #FF3B30; padding: 8px 12px; border-radius: 6px; margin: 10px 20px; font-size: 12px; border: 1px solid #FF3B3025;";
+                    errorDiv.textContent = `Error: ${error.message || error || "Action failed"}`;
+
+                    // Show content again on error
+                    document.getElementById("loading").style.display = "none";
+                    document.getElementById("content").style.display = "block";
+
+                    // Add error message to the UI
+                    const contentArea = document.querySelector(".content-area");
+                    const processTree = document.querySelector(".process-tree");
+                    if (contentArea && processTree) {
+                        contentArea.insertBefore(errorDiv, processTree);
+                    }
+
+                    // Remove error message after 5 seconds
+                    setTimeout(() => {
+                        if (errorDiv.parentNode) {
+                            errorDiv.remove();
+                        }
+                    }, 5000);
+                }
+            }
+
+            // Log when page is fully loaded
+            window.addEventListener("load", () => {
+                console.log("[NoSwiper UI] Page loaded successfully");
+                console.log(
+                    "[NoSwiper UI] Tauri available:",
+                    !!window.__TAURI__,
+                );
+
+                // For testing - display mock violation in browser mode
+                if (!window.__TAURI__) {
+                    console.log("[NoSwiper UI] Displaying test violation data");
+                    displayViolation({
+                        event_id: "test-123",
+                        rule_name: "ssh",
+                        file_path: "/Users/test/.ssh/id_rsa",
+                        process_path: "/bin/cat",
+                        process_pid: 12345,
+                        team_id: "TEST123",
+                        mode: "monitor",
+                        process_tree: [
+                            {
+                                name: "cat",
+                                pid: 12345,
+                                cmdline: "/bin/cat /Users/test/.ssh/id_rsa",
+                            },
+                            { name: "bash", pid: 12344, cmdline: "/bin/bash" },
+                            {
+                                name: "Terminal",
+                                pid: 12340,
+                                cmdline:
+                                    "/System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal",
+                            },
+                        ],
+                    });
+                }
+            });
+
+            // Log any unhandled errors
+            window.addEventListener("error", (event) => {
+                console.error("[NoSwiper UI] Unhandled error:", event.error);
+            });
+
+            window.addEventListener("unhandledrejection", (event) => {
+                console.error(
+                    "[NoSwiper UI] Unhandled promise rejection:",
+                    event.reason,
+                );
+            });
+        </script>
+    </body>
+</html>

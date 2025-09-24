@@ -8,6 +8,12 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/yourusername/noswiper"
 keywords = ["security", "credentials", "protection", "daemon"]
 
+[lints.rust]
+warnings = "deny"  # Treat all warnings as errors
+deprecated = "deny"
+dead_code = "warn"  # Warn for agent, we might have some unused during development
+unused = "deny"
+
 [[bin]]
 name = "noswiper-agent"
 path = "src/main.rs"

@@ -1,14 +1,18 @@
 #![deny(warnings)]
+#![allow(clippy::multiple_crate_versions)] // Dependencies have version conflicts
+#![allow(clippy::cargo_common_metadata)] // Not publishing to crates.io yet
 
 mod allow_rule;
 mod cli;
 mod config;
 mod defaults;
+mod error;
 mod ipc_server;
 mod json_logger;
 mod monitor;
 mod process_context;
 mod rules;
+mod types;
 
 #[cfg(target_os = "linux")]
 mod linux_monitor;
@@ -24,9 +28,9 @@ mod freebsd_monitor;
 ))]
 mod dtrace_monitor;
 
-use anyhow::Result;
 use clap::Parser;
 use cli::{Args, LogLevel};
+use error::{NoSwiperError, PermissionError, Result};
 use log::{error, info};
 use monitor::Monitor;
 
@@ -93,7 +97,7 @@ async fn main() -> Result<()> {
     };
 
     info!("NoSwiper daemon shutting down");
-    shutdown_result
+    shutdown_result.map_err(NoSwiperError::from)
 }
 
 fn init_logging(log_level: &LogLevel) -> Result<()> {
@@ -157,10 +161,7 @@ fn check_root_privileges() -> Result<()> {
     #[cfg(unix)]
     {
         if unsafe { libc::geteuid() } != 0 {
-            return Err(anyhow::anyhow!(
-                "NoSwiper daemon requires root privileges to monitor file access.\n\
-                Please run with: sudo noswiper-daemon"
-            ));
+            return Err(PermissionError::NotRoot.into());
         }
     }
 
@@ -168,11 +169,12 @@ fn check_root_privileges() -> Result<()> {
     {
         // On Windows, check for administrator privileges
         // This is a simplified check - a full implementation would use Windows APIs
-        if std::env::var("USERNAME").unwrap_or_default() != "Administrator" {
-            return Err(anyhow::anyhow!(
-                "NoSwiper daemon requires administrator privileges.\n\
-                Please run as Administrator."
-            ));
+        let username = std::env::var("USERNAME").unwrap_or_else(|_| "Unknown".to_string());
+        if username != "Administrator" {
+            return Err(PermissionError::InsufficientPrivileges(
+                "Administrator privileges required on Windows".to_string(),
+            )
+            .into());
         }
     }
 
@@ -187,7 +189,7 @@ fn show_config() {
     println!();
 
     // Load the actual configuration
-    match Config::default() {
+    match Config::load_default() {
         Ok(config) => {
             println!("Protected Files ({} rules):", config.protected_files.len());
             println!();
@@ -219,7 +221,10 @@ fn show_config() {
                 println!();
             }
 
-            println!("Global Exclusions: {} rule(s)", config.global_exclusions.len());
+            println!(
+                "Global Exclusions: {} rule(s)",
+                config.global_exclusions.len()
+            );
             for (i, rule) in config.global_exclusions.iter().enumerate() {
                 print!("  {}. ", i + 1);
                 if let Some(team_id) = &rule.team_id {
@@ -252,10 +257,7 @@ fn show_config() {
 
 fn validate_config(config_path: &std::path::Path) -> Result<()> {
     if !config_path.exists() {
-        return Err(anyhow::anyhow!(
-            "Configuration file does not exist: {}",
-            config_path.display()
-        ));
+        return Err(error::ConfigError::FileNotFound(config_path.to_path_buf()).into());
     }
 
     // For now, just check if it's a valid file
@@ -265,7 +267,7 @@ fn validate_config(config_path: &std::path::Path) -> Result<()> {
             println!("✓ Configuration file is valid: {}", config_path.display());
             Ok(())
         }
-        Err(e) => Err(anyhow::anyhow!("Failed to read configuration file: {}", e)),
+        Err(e) => Err(NoSwiperError::Io(e)),
     }
 }
 
@@ -275,7 +277,7 @@ mod tests {
     fn test_config_loading() {
         // Test that default config loads from embedded YAML
         use crate::config::Config;
-        let config = Config::default();
+        let config = Config::load_default();
         assert!(
             config.is_ok(),
             "Failed to load default config: {:?}",

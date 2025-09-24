@@ -149,7 +149,8 @@ fn get_process_info(pid: u32) -> ProcessInfo {
     let name = fs::read_to_string(&cmdline_path)
         .ok()
         .and_then(|content| {
-            content.split('\0')
+            content
+                .split('\0')
                 .next()
                 .map(|s| s.rsplit('/').next().unwrap_or(s).to_string())
         })

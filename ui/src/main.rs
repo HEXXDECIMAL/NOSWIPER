@@ -8,15 +8,20 @@
 #![warn(clippy::pedantic)]
 #![warn(clippy::nursery)]
 #![warn(clippy::cargo)]
+#![allow(clippy::multiple_crate_versions)] // Dependencies have version conflicts
+#![allow(clippy::cargo_common_metadata)] // Not publishing to crates.io yet
+#![allow(clippy::doc_markdown)] // Allow unformatted names in docs
+#![allow(clippy::similar_names)] // pid/ppid are standard naming
 #![allow(clippy::module_name_repetitions)]
 
 mod ipc_client;
 mod process_info;
+mod violation_dialog;
 
+use std::io::BufRead;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
-use std::io::BufRead;
 
 use tray_icon::{
     menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem},
@@ -24,7 +29,7 @@ use tray_icon::{
 };
 use winit::event_loop::{ControlFlow, EventLoop};
 
-use ipc_client::{DaemonMode, DaemonStatus, IpcClient, Event, EventType, ClientResponse};
+use ipc_client::{ClientResponse, DaemonMode, DaemonStatus, Event, EventType, IpcClient};
 use process_info::{ProcessTree, SigningInfo};
 
 /// Shared state for tracking suspended processes and daemon status
@@ -47,6 +52,10 @@ fn main() {
     let initial_status = client.get_status().ok();
     *CURRENT_STATUS.lock().unwrap() = initial_status.clone();
 
+    // Get the current mode from the server
+    let current_mode = client.get_mode().unwrap_or(DaemonMode::Monitor);
+    let is_enforce = matches!(current_mode, DaemonMode::Enforce);
+
     // Create event loop for windowing system (required for tray icon)
     let event_loop = EventLoop::new().expect("Failed to create event loop");
 
@@ -62,12 +71,8 @@ fn main() {
     let status_item = MenuItem::new(status_text, false, None);
     let separator1 = PredefinedMenuItem::separator();
 
-    // Mode items with checkboxes
-    let is_monitor = initial_status.as_ref().map_or(false, |s| matches!(s.mode, DaemonMode::Monitor));
-    let is_enforce = initial_status.as_ref().map_or(false, |s| matches!(s.mode, DaemonMode::Enforce));
-
-    let monitor_item = CheckMenuItem::new("Monitor Mode", true, is_monitor, None);
-    let enforce_item = CheckMenuItem::new("Enforce Mode", true, is_enforce, None);
+    let enforce_checkbox =
+        CheckMenuItem::new("Enforce access restrictions", true, is_enforce, None);
     let separator2 = PredefinedMenuItem::separator();
 
     // Just the quit item
@@ -77,8 +82,7 @@ fn main() {
     log::debug!("Building menu...");
     tray_menu.append(&status_item).ok();
     tray_menu.append(&separator1).ok();
-    tray_menu.append(&monitor_item).ok();
-    tray_menu.append(&enforce_item).ok();
+    tray_menu.append(&enforce_checkbox).ok();
     tray_menu.append(&separator2).ok();
     tray_menu.append(&quit_item).ok();
     log::debug!("Menu built successfully");
@@ -115,21 +119,57 @@ fn main() {
             log::info!("System tray icon created successfully");
 
             // Clone references for menu IDs
-            let monitor_id = monitor_item.id().clone();
-            let enforce_id = enforce_item.id().clone();
+            let enforce_id = enforce_checkbox.id().clone();
             let status_id = status_item.id().clone();
 
             // Start violation monitor in background thread
             let client_clone = client.clone();
             thread::spawn(move || {
                 log::info!("Starting violation monitor thread");
-                violation_monitor(client_clone, monitor_id, enforce_id, status_id);
+                violation_monitor(client_clone, enforce_id, status_id);
+            });
+
+            // Start status monitoring in a separate thread
+            let client_status = client.clone();
+            thread::spawn(move || {
+                let mut last_ok = true;
+
+                loop {
+                    match client_status.get_status() {
+                        Ok(status) => {
+                            *CURRENT_STATUS.lock().unwrap() = Some(status.clone());
+                            if !last_ok {
+                                last_ok = true;
+                                log::info!("Agent is now running");
+                            }
+
+                            log::trace!(
+                                "Daemon status: mode={:?}, events_pending={}",
+                                status.mode,
+                                status.violations_count
+                            );
+                        }
+                        Err(e) => {
+                            *CURRENT_STATUS.lock().unwrap() = None;
+                            if last_ok {
+                                last_ok = false;
+                                log::warn!("Agent is not running or not accessible: {}", e);
+
+                                // Run diagnostics on first failure
+                                let diagnostics = client_status.diagnose_connection();
+                                log::warn!("Connection diagnostics:\n{}", diagnostics);
+                            }
+                        }
+                    }
+                    thread::sleep(Duration::from_secs(30)); // Check less frequently to avoid reconnection spam
+                }
             });
 
             // Run event loop
             log::info!("Starting event loop...");
             let client_ref = client;
 
+            #[allow(deprecated)] // tray-icon still uses the old API
             let _ = event_loop.run(move |_event, control_flow| {
                 control_flow.set_control_flow(ControlFlow::Wait);
 
@@ -137,23 +177,25 @@ fn main() {
                 if let Ok(event) = MenuEvent::receiver().try_recv() {
                     log::debug!("Menu event received");
 
-                    if event.id == monitor_item.id() {
-                        log::info!("Setting monitor mode");
-                        if let Err(e) = client_ref.set_mode(DaemonMode::Monitor) {
-                            log::error!("Failed to set monitor mode: {}", e);
+                    if event.id == enforce_checkbox.id() {
+                        // Toggle between monitor and enforce modes
+                        let current_is_enforce = enforce_checkbox.is_checked();
+                        let new_mode = if current_is_enforce {
+                            // Currently enforcing, switch to monitor
+                            DaemonMode::Monitor
                         } else {
-                            // Update checkboxes
-                            monitor_item.set_checked(true);
-                            enforce_item.set_checked(false);
-                        }
-                    } else if event.id == enforce_item.id() {
-                        log::info!("Setting enforce mode");
-                        if let Err(e) = client_ref.set_mode(DaemonMode::Enforce) {
-                            log::error!("Failed to set enforce mode: {}", e);
+                            // Currently monitoring, switch to enforce
+                            DaemonMode::Enforce
+                        };
+
+                        log::info!("Setting mode to: {:?}", new_mode);
+                        if let Err(e) = client_ref.set_mode(new_mode) {
+                            log::error!("Failed to set mode: {}", e);
+                            // Revert checkbox state on failure
+                            enforce_checkbox.set_checked(current_is_enforce);
                         } else {
-                            // Update checkboxes
-                            monitor_item.set_checked(false);
-                            enforce_item.set_checked(true);
+                            // Update checkbox to reflect new state
+                            enforce_checkbox.set_checked(!current_is_enforce);
                         }
                     } else if event.id == quit_item.id() {
                         log::info!("Quitting NoSwiper UI");
@@ -174,7 +216,6 @@ fn main() {
 /// Monitor for violations and daemon status
 fn violation_monitor(
     client: Arc<IpcClient>,
-    _monitor_menu_id: tray_icon::menu::MenuId,
     _enforce_menu_id: tray_icon::menu::MenuId,
     _status_menu_id: tray_icon::menu::MenuId,
 ) {
@@ -190,45 +231,33 @@ fn violation_monitor(
         }
         Err(e) => {
             log::error!("Failed to subscribe to events: {}", e);
+
+            // Run diagnostics to help the user understand the issue
+            let diagnostics = client.diagnose_connection();
+            log::error!("Connection diagnostics:\n{}", diagnostics);
+
+            // Also print to stderr so it's visible even without debug logs
+            eprintln!("\n{}", diagnostics);
+
             None
         }
     };
 
-    // Start status monitoring in a separate thread
-    let client_status = client.clone();
-    thread::spawn(move || {
-        let mut last_ok = true;
-        loop {
-            match client_status.get_status() {
-                Ok(status) => {
-                    *CURRENT_STATUS.lock().unwrap() = Some(status.clone());
-                    if !last_ok {
-                        last_ok = true;
-                        log::info!("Agent is now running");
-                    }
-                    log::trace!("Daemon status: mode={:?}, events_pending={}",
-                        status.mode, status.violations_count);
-                }
-                Err(_) => {
-                    *CURRENT_STATUS.lock().unwrap() = None;
-                    if last_ok {
-                        last_ok = false;
-                        log::warn!("Agent is not running or not accessible");
-                    }
-                }
-            }
-            thread::sleep(Duration::from_secs(5));
-        }
-    });
+    // This status monitoring thread will be started inside the tray Ok block
+    // to avoid duplication
 
     // Process events if we have a subscription
     if let Some(mut reader) = event_reader {
+        log::info!("Starting event processing loop");
+        let mut lines_read = 0;
+        let mut events_received = 0;
+        let mut last_log_time = std::time::Instant::now();
 
         loop {
             let mut line = String::new();
             match reader.read_line(&mut line) {
                 Ok(0) => {
-                    log::warn!("Event stream closed, attempting to reconnect...");
+                    log::warn!("Event stream closed (EOF), attempting to reconnect...");
                     thread::sleep(Duration::from_secs(2));
 
                     // Try to reconnect
@@ -236,7 +265,8 @@ fn violation_monitor(
                         Ok(new_reader) => {
                             reader = new_reader;
                             log::info!("Reconnected to event stream");
-                            continue;
+                            lines_read = 0;
+                            events_received = 0;
                         }
                         Err(e) => {
                             log::error!("Failed to reconnect: {}", e);
@@ -244,22 +274,90 @@ fn violation_monitor(
                         }
                     }
                 }
-                Ok(_) => {
-                    // Parse the event
-                    match serde_json::from_str::<ClientResponse>(&line) {
-                        Ok(ClientResponse::Event(event)) => {
-                            handle_event(event, &mut processed_violations, &client);
+                Ok(bytes_read) => {
+                    lines_read += 1;
+
+                    // Log raw data periodically
+                    if !line.trim().is_empty() {
+                        log::debug!("Received line ({} bytes): {}", bytes_read, line.trim());
+
+                        // Parse the event
+                        match serde_json::from_str::<ClientResponse>(&line) {
+                            Ok(ClientResponse::Event(event)) => {
+                                events_received += 1;
+                                log::info!(
+                                    "Event #{} received: {:?}",
+                                    events_received,
+                                    event.event_type
+                                );
+                                handle_event(event, &mut processed_violations, &client);
+                            }
+                            Ok(ClientResponse::Success { message }) => {
+                                log::debug!("Received success response: {}", message);
+                            }
+                            Ok(ClientResponse::Error { message }) => {
+                                log::warn!("Received error from daemon: {}", message);
+                            }
+                            Ok(ClientResponse::Status {
+                                mode,
+                                events_pending,
+                                connected_clients,
+                            }) => {
+                                log::debug!(
+                                    "Received status: mode={}, pending={}, clients={}",
+                                    mode,
+                                    events_pending,
+                                    connected_clients
+                                );
+                            }
+
+                            Err(e) => {
+                                log::warn!("Failed to parse JSON: {} (line: {})", e, line.trim());
+                            }
                         }
-                        Ok(other) => {
-                            log::debug!("Received non-event response: {:?}", other);
+                    }
+
+                    // Log stats every 30 seconds
+                    if last_log_time.elapsed() > Duration::from_secs(30) {
+                        log::info!(
+                            "Event stream stats: {} lines read, {} events received",
+                            lines_read,
+                            events_received
+                        );
+                        last_log_time = std::time::Instant::now();
+                    }
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    // This is expected when there are no events - just continue
+                    thread::sleep(Duration::from_millis(100));
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::TimedOut => {
+                    // Also expected for timeouts - just continue
+                    thread::sleep(Duration::from_millis(100));
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
+                    log::warn!("Unexpected EOF on event stream, reconnecting...");
+                    thread::sleep(Duration::from_secs(1));
+
+                    match client.subscribe_to_events() {
+                        Ok(new_reader) => {
+                            reader = new_reader;
+                            log::info!("Reconnected after unexpected EOF");
+                            lines_read = 0;
+                            events_received = 0;
                         }
                         Err(e) => {
-                            log::warn!("Failed to parse event: {} (line: {})", e, line.trim());
+                            log::error!("Failed to reconnect after EOF: {}", e);
+                            thread::sleep(Duration::from_secs(5));
                         }
                     }
                 }
                 Err(e) => {
-                    log::error!("Error reading event stream: {}", e);
+                    log::error!(
+                        "Unexpected error reading event stream: {} (kind: {:?})",
+                        e,
+                        e.kind()
+                    );
                     thread::sleep(Duration::from_secs(2));
                 }
             }
@@ -273,11 +371,7 @@ fn violation_monitor(
 }
 
 /// Handle an event from the agent
-fn handle_event(
-    event: Event,
-    processed_violations: &mut Vec<String>,
-    client: &Arc<IpcClient>,
-) {
+fn handle_event(event: Event, processed_violations: &mut Vec<String>, client: &Arc<IpcClient>) {
     // Skip if already processed
     if processed_violations.contains(&event.id) {
         return;
@@ -291,8 +385,12 @@ fn handle_event(
             action,
             ..
         } => {
-            log::warn!("Access denied: {} (PID: {}) accessing {}",
-                process_path, process_pid, file_path);
+            log::warn!(
+                "Access denied: {} (PID: {}) accessing {}",
+                process_path,
+                process_pid,
+                file_path
+            );
 
             processed_violations.push(event.id.clone());
 
@@ -306,11 +404,7 @@ fn handle_event(
             // Track suspended process
             {
                 let mut suspended = SUSPENDED_PROCESSES.lock().unwrap();
-                suspended.push((
-                    *process_pid,
-                    process_name.clone(),
-                    process_path.clone()
-                ));
+                suspended.push((*process_pid, process_name.clone(), process_path.clone()));
                 // Keep only last 10 suspended processes
                 if suspended.len() > 10 {
                     suspended.remove(0);
@@ -318,7 +412,7 @@ fn handle_event(
                 log::info!("Tracked suspended process, total: {}", suspended.len());
             }
 
-            // Get process info
+            // Get process info (for console output)
             let process_tree = process_info::get_process_tree(*process_pid);
             let signing_info = process_info::get_signing_info(process_path);
 
@@ -333,8 +427,25 @@ fn handle_event(
                 action_taken: action.clone(),
             };
 
-            // Show native notification
-            show_violation_notification(&violation, &process_tree, &signing_info, client);
+            // Show console notification for debugging
+            show_violation_notification_console(&violation, &process_tree, &signing_info, client);
+
+            // Create and show violation dialog
+            let event_id = event.id.clone();
+            let event_type = event.event_type.clone();
+            let client_clone = Arc::clone(client);
+
+            // Spawn a new thread for the dialog to avoid blocking event processing
+            thread::spawn(move || {
+                log::info!("Opening violation dialog for event {}", event_id);
+                if let Some(dialog) =
+                    violation_dialog::ViolationDialog::new(event_id, &event_type, client_clone)
+                {
+                    dialog.show();
+                } else {
+                    log::error!("Failed to create violation dialog");
+                }
+            });
         }
         EventType::AccessAllowed { .. } => {
             // Log allowed access but don't show notification
@@ -348,17 +459,18 @@ fn handle_event(
     }
 }
 
-
-/// Show a native notification for a violation
-/// In production, this would create a proper window
-fn show_violation_notification(
+/// Show a console notification for a violation (for debugging)
+fn show_violation_notification_console(
     violation: &ipc_client::Violation,
     process_tree: &ProcessTree,
     signing_info: &Option<SigningInfo>,
     client: &Arc<IpcClient>,
 ) {
     eprintln!("\n=== 🕵️ SECURITY VIOLATION DETECTED ===");
-    eprintln!("Process: {} (PID: {})", violation.process_name, violation.pid);
+    eprintln!(
+        "Process: {} (PID: {})",
+        violation.process_name, violation.pid
+    );
     eprintln!("Path: {}", violation.process_path);
     eprintln!("Attempted to access: {}", violation.file_path);
 

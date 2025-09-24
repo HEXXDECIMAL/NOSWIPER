@@ -1,0 +1,459 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Override Rules</title>
+        <style>
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+
+            body {
+                font-family:
+                    -apple-system, BlinkMacSystemFont, "SF Pro Text",
+                    "Helvetica Neue", sans-serif;
+                background: #ffffff;
+                color: #000000;
+                height: 100vh;
+                display: flex;
+                flex-direction: column;
+                -webkit-font-smoothing: antialiased;
+                -moz-osx-font-smoothing: grayscale;
+            }
+
+            /* Dark mode support */
+            @media (prefers-color-scheme: dark) {
+                body {
+                    background: #1e1e1e;
+                    color: #cccccc;
+                }
+
+                .header {
+                    background: linear-gradient(
+                        180deg,
+                        #383838 0%,
+                        #2e2e2e 100%
+                    );
+                    border-bottom-color: #464647;
+                }
+
+                .header h1 {
+                    color: #cccccc;
+                }
+
+                .editor-wrapper {
+                    background: #1e1e1e;
+                }
+
+                .line-numbers {
+                    background: #1e1e1e;
+                    color: #858585;
+                    border-right-color: #2e2e2e;
+                }
+
+                .code-content {
+                    background: #1e1e1e;
+                    color: #d4d4d4;
+                }
+
+                .footer {
+                    background: #2e2e2e;
+                    border-top-color: #464647;
+                    color: #969696;
+                }
+
+                /* Dark mode syntax colors */
+                .yaml-comment {
+                    color: #6a9955;
+                }
+                .yaml-key {
+                    color: #9cdcfe;
+                }
+                .yaml-string {
+                    color: #ce9178;
+                }
+                .yaml-number {
+                    color: #b5cea8;
+                }
+                .yaml-boolean {
+                    color: #569cd6;
+                }
+                .yaml-dash {
+                    color: #ffd700;
+                }
+            }
+
+            .header {
+                background: linear-gradient(180deg, #f6f6f6 0%, #e7e7e7 100%);
+                padding: 10px 20px;
+                border-bottom: 1px solid #d1d1d1;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                flex-shrink: 0;
+            }
+
+            .header h1 {
+                font-size: 13px;
+                font-weight: 500;
+                color: #1d1d1f;
+                letter-spacing: -0.01em;
+            }
+
+            .info {
+                font-size: 11px;
+                opacity: 0.6;
+                font-family: "SF Mono", Monaco, Menlo, monospace;
+            }
+
+            .editor-wrapper {
+                flex: 1;
+                display: flex;
+                overflow: hidden;
+                background: #ffffff;
+            }
+
+            .line-numbers {
+                width: 48px;
+                padding: 12px 0;
+                background: #fafafa;
+                border-right: 1px solid #e5e5e7;
+                color: #8e8e93;
+                font-family: "SF Mono", Monaco, Menlo, monospace;
+                font-size: 11px;
+                line-height: 18px;
+                text-align: right;
+                user-select: none;
+                flex-shrink: 0;
+                overflow: hidden;
+            }
+
+            .line-number {
+                padding-right: 12px;
+                height: 18px;
+            }
+
+            .code-container {
+                flex: 1;
+                overflow: auto;
+                position: relative;
+            }
+
+            .code-content {
+                padding: 12px 16px;
+                font-family: "SF Mono", Monaco, Menlo, monospace;
+                font-size: 12px;
+                line-height: 18px;
+                white-space: pre;
+                min-height: 100%;
+                background: #ffffff;
+                color: #000000;
+            }
+
+            /* Light mode syntax highlighting */
+            .yaml-comment {
+                color: #6a7f71;
+                font-style: italic;
+            }
+
+            .yaml-key {
+                color: #0451a5;
+                font-weight: 500;
+            }
+
+            .yaml-string {
+                color: #a31515;
+            }
+
+            .yaml-number {
+                color: #098658;
+            }
+
+            .yaml-boolean {
+                color: #0000ff;
+            }
+
+            .yaml-dash {
+                color: #0451a5;
+                font-weight: 600;
+            }
+
+            /* Scrollbar styling - macOS like */
+            ::-webkit-scrollbar {
+                width: 14px;
+                height: 14px;
+            }
+
+            ::-webkit-scrollbar-track {
+                background: transparent;
+            }
+
+            ::-webkit-scrollbar-thumb {
+                background: rgba(0, 0, 0, 0.15);
+                border-radius: 10px;
+                border: 3px solid transparent;
+                background-clip: padding-box;
+            }
+
+            ::-webkit-scrollbar-thumb:hover {
+                background: rgba(0, 0, 0, 0.25);
+                background-clip: padding-box;
+            }
+
+            @media (prefers-color-scheme: dark) {
+                ::-webkit-scrollbar-thumb {
+                    background: rgba(255, 255, 255, 0.15);
+                    background-clip: padding-box;
+                }
+
+                ::-webkit-scrollbar-thumb:hover {
+                    background: rgba(255, 255, 255, 0.25);
+                    background-clip: padding-box;
+                }
+            }
+
+            .footer {
+                background: #f6f6f6;
+                border-top: 1px solid #d1d1d1;
+                padding: 6px 20px;
+                font-size: 11px;
+                color: #86868b;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                flex-shrink: 0;
+            }
+
+            .footer-left {
+                display: flex;
+                align-items: center;
+                gap: 16px;
+            }
+
+            .status {
+                display: flex;
+                align-items: center;
+                gap: 6px;
+            }
+
+            .status-dot {
+                width: 6px;
+                height: 6px;
+                border-radius: 50%;
+                background: #34c759;
+            }
+
+            /* Empty state */
+            .empty-state {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                height: 100%;
+                color: #8e8e93;
+                font-size: 13px;
+            }
+
+            .empty-icon {
+                font-size: 48px;
+                margin-bottom: 12px;
+                opacity: 0.3;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <h1>Override Rules</h1>
+            <span class="info" id="file-path"></span>
+        </div>
+
+        <div class="editor-wrapper">
+            <div class="line-numbers" id="line-numbers"></div>
+            <div class="code-container">
+                <div class="code-content" id="yaml-content">Loading...</div>
+            </div>
+        </div>
+
+        <div class="footer">
+            <div class="footer-left">
+                <div class="status">
+                    <span class="status-dot"></span>
+                    <span>Read-only</span>
+                </div>
+                <span id="line-count"></span>
+            </div>
+            <span>YAML</span>
+        </div>
+
+        <script>
+            // Function to apply syntax highlighting to YAML
+            function highlightYaml(text) {
+                // Escape HTML
+                text = text
+                    .replace(/&/g, "&amp;")
+                    .replace(/</g, "&lt;")
+                    .replace(/>/g, "&gt;");
+
+                // Split into lines for better processing
+                const lines = text.split("\n");
+                const highlightedLines = lines.map((line) => {
+                    // Skip empty lines
+                    if (!line.trim()) return line;
+
+                    // Highlight comments (entire line)
+                    if (line.trim().startsWith("#")) {
+                        return `<span class="yaml-comment">${line}</span>`;
+                    }
+
+                    // Process line character by character for other highlights
+                    let result = line;
+
+                    // Highlight list items (-)
+                    result = result.replace(
+                        /^(\s*)(-)(\s+)/,
+                        '$1<span class="yaml-dash">$2</span>$3',
+                    );
+
+                    // Highlight keys (word followed by colon)
+                    result = result.replace(
+                        /(\w+)(:)/,
+                        '<span class="yaml-key">$1</span>$2',
+                    );
+
+                    // Highlight strings in quotes
+                    result = result.replace(
+                        /"([^"]*)"/,
+                        '<span class="yaml-string">"$1"</span>',
+                    );
+                    result = result.replace(
+                        /'([^']*)'/,
+                        "<span class=\"yaml-string\">'$1'</span>",
+                    );
+
+                    // Highlight booleans
+                    result = result.replace(
+                        /\b(true|false|yes|no|on|off)\b/gi,
+                        '<span class="yaml-boolean">$1</span>',
+                    );
+
+                    // Highlight numbers
+                    result = result.replace(
+                        /\b(\d+)\b/g,
+                        '<span class="yaml-number">$1</span>',
+                    );
+
+                    return result;
+                });
+
+                return highlightedLines.join("\n");
+            }
+
+            // Function to generate line numbers
+            function generateLineNumbers(lineCount) {
+                let html = "";
+                for (let i = 1; i <= lineCount; i++) {
+                    html += `<div class="line-number">${i}</div>`;
+                }
+                return html;
+            }
+
+            // Function to get the OS-appropriate config path
+            function getConfigPath() {
+                const platform = navigator.platform.toLowerCase();
+                if (platform.includes("mac")) {
+                    return "/Library/Application Support/NoSwiper/overrides.yaml";
+                } else if (platform.includes("linux")) {
+                    return "/etc/noswiper/custom_rules.yaml";
+                } else if (platform.includes("bsd")) {
+                    return "/usr/local/etc/noswiper/custom_rules.yaml";
+                } else {
+                    return "/etc/noswiper/custom_rules.yaml";
+                }
+            }
+
+            // Sync scrolling between line numbers and code
+            function setupScrollSync() {
+                const codeContainer = document.querySelector(".code-container");
+                const lineNumbers = document.querySelector(".line-numbers");
+
+                if (codeContainer && lineNumbers) {
+                    codeContainer.addEventListener("scroll", () => {
+                        lineNumbers.scrollTop = codeContainer.scrollTop;
+                    });
+                }
+            }
+
+            // Load and display overrides
+            async function loadOverrides() {
+                try {
+                    // Get overrides content
+                    let content;
+                    if (
+                        window.__TAURI__ &&
+                        window.__TAURI__.core &&
+                        window.__TAURI__.core.invoke
+                    ) {
+                        const invoke = window.__TAURI__.core.invoke;
+                        content = await invoke("get_overrides");
+                    } else if (window.__overridesContent) {
+                        // Content was injected by the parent window
+                        content = window.__overridesContent;
+                    } else {
+                        content = "# No override rules found";
+                    }
+
+                    // Check if we have actual content
+                    if (!content || content.trim() === "") {
+                        // Show empty state
+                        document.querySelector(".editor-wrapper").innerHTML = `
+                            <div class="empty-state">
+                                <div class="empty-icon">📄</div>
+                                <div>No override rules defined</div>
+                            </div>
+                        `;
+                        document.getElementById("line-count").textContent =
+                            "0 lines";
+                        return;
+                    }
+
+                    // Display the content with syntax highlighting
+                    const yamlElement = document.getElementById("yaml-content");
+                    yamlElement.innerHTML = highlightYaml(content);
+
+                    // Generate and display line numbers
+                    const lines = content.split("\n");
+                    const lineCount = lines.length;
+                    document.getElementById("line-numbers").innerHTML =
+                        generateLineNumbers(lineCount);
+
+                    // Update file path
+                    document.getElementById("file-path").textContent =
+                        getConfigPath();
+
+                    // Update line count in footer
+                    document.getElementById("line-count").textContent =
+                        `${lineCount} line${lineCount !== 1 ? "s" : ""}`;
+
+                    // Setup scroll sync
+                    setupScrollSync();
+                } catch (error) {
+                    console.error("Failed to load overrides:", error);
+                    const yamlElement = document.getElementById("yaml-content");
+                    yamlElement.innerHTML = `<span class="yaml-comment"># Error loading override rules\n# ${error.message}</span>`;
+                    document.getElementById("line-numbers").innerHTML =
+                        generateLineNumbers(2);
+                    setupScrollSync();
+                }
+            }
+
+            // Load overrides when page loads
+            window.addEventListener("DOMContentLoaded", loadOverrides);
+
+            // Reload on focus (in case rules were updated)
+            window.addEventListener("focus", loadOverrides);
+        </script>
+    </body>
+</html>

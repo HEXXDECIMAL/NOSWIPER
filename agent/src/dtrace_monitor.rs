@@ -157,7 +157,7 @@ proc:::exec-success
 impl DTraceMonitor {
     pub fn new(mode: Mode, verbose: bool, stop_parent: bool) -> Self {
         // Load config from embedded YAML
-        let config = Config::default().expect("Failed to load default config");
+        let config = Config::load_default().expect("Failed to load default config");
         let platform = Platform::detect();
         let dtrace_script = platform.dtrace_script();
 

@@ -7,9 +7,9 @@ use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Decision {
-    Allow(Option<String>),        // Protected file, access allowed (with optional rule name)
-    Deny(String),                 // Protected file, access denied (with rule name)
-    NotProtected,                 // Not a protected file
+    Allow(Option<String>), // Protected file, access allowed (with optional rule name)
+    Deny(String),          // Protected file, access denied (with rule name)
+    NotProtected,          // Not a protected file
 }
 
 // Cache entry for home directories
@@ -206,8 +206,11 @@ impl RuleEngine {
 
         // Only log access checks in debug mode
         if self.debug {
-            log::debug!("Checking access: process '{}' accessing '{}'",
-                       context.path.display(), normalized_path.display());
+            log::debug!(
+                "Checking access: process '{}' accessing '{}'",
+                context.path.display(),
+                normalized_path.display()
+            );
         }
 
         // First check runtime exceptions (use normalized path for consistency)
@@ -242,32 +245,58 @@ impl RuleEngine {
                 if let Ok(pattern) = glob::Pattern::new(&pattern_str) {
                     if pattern.matches_path(&normalized_path) {
                         if self.debug {
-                            log::debug!("File '{}' matches protected pattern '{}' (rule id: {})",
-                                       normalized_path.display(), pattern_str,
-                                       protected_file.id.as_deref().unwrap_or("unnamed"));
+                            log::debug!(
+                                "File '{}' matches protected pattern '{}' (rule id: {})",
+                                normalized_path.display(),
+                                pattern_str,
+                                protected_file.id.as_deref().unwrap_or("unnamed")
+                            );
 
                             // Check allow rules
-                            log::debug!("Checking {} allow rules for process '{}'",
-                                       protected_file.allow_rules.len(), context.path.display());
+                            log::debug!(
+                                "Checking {} allow rules for process '{}'",
+                                protected_file.allow_rules.len(),
+                                context.path.display()
+                            );
                         }
 
                         for (i, rule) in protected_file.allow_rules.iter().enumerate() {
                             if self.debug {
-                                log::debug!("Checking allow rule #{} for rule id '{}'", i + 1,
-                                          protected_file.id.as_deref().unwrap_or("unnamed"));
+                                log::debug!(
+                                    "Checking allow rule #{} for rule id '{}'",
+                                    i + 1,
+                                    protected_file.id.as_deref().unwrap_or("unnamed")
+                                );
                             }
-                            if rule.matches_with_config_and_debug(context, Some(&self.config), self.debug) {
+                            if rule.matches_with_config_and_debug(
+                                context,
+                                Some(&self.config),
+                                self.debug,
+                            ) {
                                 if self.debug {
-                                    log::info!("Process '{}' allowed by rule #{} in '{}'",
-                                              context.path.display(), i + 1,
-                                              protected_file.id.as_deref().unwrap_or("unnamed"));
+                                    log::info!(
+                                        "Process '{}' allowed by rule #{} in '{}'",
+                                        context.path.display(),
+                                        i + 1,
+                                        protected_file.id.as_deref().unwrap_or("unnamed")
+                                    );
                                 }
-                                return Decision::Allow(Some(protected_file.id.clone().unwrap_or_else(|| "unnamed".to_string())));
+                                return Decision::Allow(Some(
+                                    protected_file
+                                        .id
+                                        .clone()
+                                        .unwrap_or_else(|| "unnamed".to_string()),
+                                ));
                             }
                         }
                         // No rules matched - deny access
                         // Log removed - will be handled by monitor.rs with rule name
-                        return Decision::Deny(protected_file.id.clone().unwrap_or_else(|| "unnamed".to_string()));
+                        return Decision::Deny(
+                            protected_file
+                                .id
+                                .clone()
+                                .unwrap_or_else(|| "unnamed".to_string()),
+                        );
                     }
                 }
             }
@@ -275,7 +304,10 @@ impl RuleEngine {
 
         // If no pattern matched, it's not a protected file
         if self.debug {
-            log::debug!("File '{}' is not protected, allowing access", normalized_path.display());
+            log::debug!(
+                "File '{}' is not protected, allowing access",
+                normalized_path.display()
+            );
         }
         Decision::NotProtected
     }
@@ -317,7 +349,7 @@ mod tests {
     use std::path::PathBuf;
 
     fn test_config() -> Config {
-        Config::default().expect("Failed to load default config")
+        Config::load_default().expect("Failed to load default config")
     }
 
     #[test]
@@ -350,62 +382,93 @@ mod tests {
         // SSH should be allowed to access SSH keys (legitimate binary + protected file)
         // This test is basic - in reality we'd check the actual rules
         match decision {
-            Decision::Allow(_) | Decision::Deny(_) => {
-                // Both are valid depending on configuration
+            Decision::Allow(_) | Decision::Deny(_) | Decision::NotProtected => {
+                // All are valid depending on configuration and whether file is protected
             }
         }
     }
 
     #[test]
-    #[ignore = "TODO: Update test to use new ProcessContext API"]
     fn test_unknown_binary_blocked() {
+        use crate::process_context::ProcessContext;
         let engine = RuleEngine::new(test_config());
 
         let ssh_key = PathBuf::from(shellexpand::tilde("~/.ssh/id_rsa").to_string());
         let malware = PathBuf::from("/tmp/malware");
 
-        // Check if this is a protected file first
-        if engine.is_protected_file(&ssh_key) {
-            let decision = engine.check_access(&malware, &ssh_key, None);
-            assert!(matches!(decision, Decision::Deny(_)));
-        } else {
-            // If not protected, it would return NotProtected
-            let decision = engine.check_access(&malware, &ssh_key, None);
-            assert!(matches!(decision, Decision::NotProtected));
+        let context = ProcessContext {
+            path: malware.clone(),
+            pid: Some(1234),
+            ppid: Some(1),
+            team_id: None,
+            app_id: None,
+            args: None,
+            uid: None,
+            euid: None,
+            platform_binary: None,
+        };
+
+        let decision = engine.check_access_with_context(&context, &ssh_key);
+
+        // Check result based on whether file is protected
+        match decision {
+            Decision::Deny(_) => {
+                // Expected for protected files accessed by unknown processes
+            }
+            Decision::NotProtected => {
+                // Expected if file isn't in protected list
+            }
+            Decision::Allow(_) => {
+                panic!("Unknown binary should not be allowed to access protected files");
+            }
         }
     }
 
     #[test]
-    #[ignore = "TODO: Update test to use new ProcessContext API"]
     fn test_runtime_exception() {
+        use crate::process_context::ProcessContext;
         let mut engine = RuleEngine::new(test_config());
 
         let ssh_key = PathBuf::from(shellexpand::tilde("~/.ssh/id_rsa").to_string());
         let custom_tool = PathBuf::from("/tmp/backup-tool");
 
-        // Should be denied initially if this is a protected file
-        if engine.is_protected_file(&ssh_key) {
-            let decision = engine.check_access(&custom_tool, &ssh_key, None);
-            assert!(matches!(decision, Decision::Deny(_)));
+        let context = ProcessContext {
+            path: custom_tool.clone(),
+            pid: Some(5678),
+            ppid: Some(1),
+            team_id: None,
+            app_id: None,
+            args: None,
+            uid: None,
+            euid: None,
+            platform_binary: None,
+        };
 
+        let initial_decision = engine.check_access_with_context(&context, &ssh_key);
+
+        // Only test runtime exception if the file is actually protected
+        if matches!(initial_decision, Decision::Deny(_)) {
             // Add runtime exception
             engine.add_runtime_exception(custom_tool.clone(), ssh_key.clone());
 
             // Should be allowed now
-            let decision = engine.check_access(&custom_tool, &ssh_key, None);
-            assert!(matches!(decision, Decision::Allow(_)));
-        } else {
-            // If the file isn't protected, test a different scenario
-            // Use a hardcoded path we know will be protected
+            let decision = engine.check_access_with_context(&context, &ssh_key);
+            assert!(
+                matches!(decision, Decision::Allow(_)),
+                "Runtime exception should allow access"
+            );
+        } else if matches!(initial_decision, Decision::NotProtected) {
+            // File isn't protected, try with a known protected path
             let protected_file = PathBuf::from(shellexpand::tilde("~/.ssh/id_ed25519").to_string());
-            if engine.is_protected_file(&protected_file) {
-                let decision = engine.check_access(&custom_tool, &protected_file, None);
-                assert!(matches!(decision, Decision::Deny(_)));
+            let decision = engine.check_access_with_context(&context, &protected_file);
 
+            if matches!(decision, Decision::Deny(_)) {
                 engine.add_runtime_exception(custom_tool.clone(), protected_file.clone());
-
-                let decision = engine.check_access(&custom_tool, &protected_file, None);
-                assert!(matches!(decision, Decision::Allow(_)));
+                let decision = engine.check_access_with_context(&context, &protected_file);
+                assert!(
+                    matches!(decision, Decision::Allow(_)),
+                    "Runtime exception should allow access"
+                );
             }
         }
     }

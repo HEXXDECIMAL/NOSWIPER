@@ -20,7 +20,7 @@ pub struct FreeBSDMonitor {
 impl FreeBSDMonitor {
     pub fn new(mode: Mode, verbose: bool, stop_parent: bool) -> Self {
         // Load config from embedded YAML
-        let config = Config::default().expect("Failed to load default config");
+        let config = Config::load_default().expect("Failed to load default config");
 
         // Create DTrace script for monitoring file opens
         let dtrace_script = r#"
@@ -173,7 +173,7 @@ proc:::exec-success
             app_id: None,  // Not available on FreeBSD
             args: None,    // Could get from procstat
             uid,
-            euid: uid,     // Using same as UID for simplicity
+            euid: uid, // Using same as UID for simplicity
         };
 
         // Check if access is allowed using new context-aware method
@@ -418,7 +418,8 @@ proc:::exec-success
             let prefix = if level == 0 { "→" } else { "└─" };
 
             let (uid, cmdline) = self.get_process_info(p);
-            let process_path = self.get_process_path(p)
+            let process_path = self
+                .get_process_path(p)
                 .map(|p| p.to_string_lossy().into_owned())
                 .unwrap_or_else(|| "?".to_string());
 
@@ -461,7 +462,8 @@ proc:::exec-success
             for pattern_str in protected_file.patterns() {
                 // Expand patterns for all users
                 for user_home in &users {
-                    let expanded_pattern = pattern_str.replacen('~', &user_home.to_string_lossy(), 1);
+                    let expanded_pattern =
+                        pattern_str.replacen('~', &user_home.to_string_lossy(), 1);
 
                     // Use glob to find matching files
                     if let Ok(entries) = glob::glob(&expanded_pattern) {

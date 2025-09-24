@@ -5,52 +5,10 @@
 //! protect and which processes are allowed to access them.
 
 use crate::allow_rule::AllowRule;
+use crate::error::{ConfigError, NoSwiperError, Result};
 use serde::{Deserialize, Serialize};
-use std::error::Error as StdError;
-use std::fmt;
 
-/// Errors that can occur during configuration loading and validation.
-#[derive(Debug)]
-pub enum ConfigError {
-    /// Invalid YAML syntax in configuration file
-    YamlParse(serde_yaml::Error),
-    /// File system error reading configuration
-    Io(std::io::Error),
-    /// Configuration validation failed
-    Validation(String),
-}
-
-impl fmt::Display for ConfigError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ConfigError::YamlParse(err) => write!(f, "YAML parsing error: {}", err),
-            ConfigError::Io(err) => write!(f, "I/O error: {}", err),
-            ConfigError::Validation(msg) => write!(f, "Configuration validation error: {}", msg),
-        }
-    }
-}
-
-impl StdError for ConfigError {
-    fn source(&self) -> Option<&(dyn StdError + 'static)> {
-        match self {
-            ConfigError::YamlParse(err) => Some(err),
-            ConfigError::Io(err) => Some(err),
-            ConfigError::Validation(_) => None,
-        }
-    }
-}
-
-impl From<serde_yaml::Error> for ConfigError {
-    fn from(err: serde_yaml::Error) -> Self {
-        ConfigError::YamlParse(err)
-    }
-}
-
-impl From<std::io::Error> for ConfigError {
-    fn from(err: std::io::Error) -> Self {
-        ConfigError::Io(err)
-    }
-}
+// ConfigError is now defined in error.rs - remove duplicate definition here
 
 // Embed the common UNIX configuration (shared across all UNIX-like systems)
 #[cfg(any(
@@ -152,13 +110,12 @@ impl Config {
     ///
     /// Returns a [`ConfigError`] if the embedded configuration is malformed
     /// or fails validation.
-    pub fn default() -> Result<Self, ConfigError> {
+    pub fn load_default() -> Result<Self> {
         // Load OS-specific config first
         let os_name = std::env::consts::OS;
-        let mut config: Config = serde_yaml::from_str(OS_CONFIG_YAML)
-            .map_err(|e| ConfigError::Validation(
-                format!("Error parsing {} config: {}", os_name, e)
-            ))?;
+        let mut config: Config = serde_yaml::from_str(OS_CONFIG_YAML).map_err(|e| {
+            ConfigError::Validation(format!("Error parsing {} config: {}", os_name, e))
+        })?;
 
         // On UNIX-like systems, merge with common UNIX configuration
         #[cfg(any(
@@ -172,10 +129,9 @@ impl Config {
             target_os = "dragonfly"
         ))]
         {
-            let unix_config: Config = serde_yaml::from_str(UNIX_CONFIG_YAML)
-                .map_err(|e| ConfigError::Validation(
-                    format!("Error parsing unix.yaml config: {}", e)
-                ))?;
+            let unix_config: Config = serde_yaml::from_str(UNIX_CONFIG_YAML).map_err(|e| {
+                ConfigError::Validation(format!("Error parsing unix.yaml config: {}", e))
+            })?;
             config.merge(unix_config);
         }
 
@@ -201,9 +157,10 @@ impl Config {
     /// Currently returns the user configuration as-is. Future versions
     /// will merge with defaults for a better user experience.
     #[allow(dead_code)] // Will be used for user configuration overrides
-    pub fn from_file(path: &std::path::Path) -> Result<Self, ConfigError> {
-        let contents = std::fs::read_to_string(path)?;
-        let user_config: Config = serde_yaml::from_str(&contents)?;
+    pub fn from_file(path: &std::path::Path) -> Result<Self> {
+        let contents = std::fs::read_to_string(path).map_err(|e| NoSwiperError::Io(e))?;
+        let user_config: Config = serde_yaml::from_str(&contents)
+            .map_err(|e| NoSwiperError::Config(ConfigError::InvalidYaml(e)))?;
         user_config.validate_global_exclusions()?;
 
         // For now, just return the user config
@@ -215,7 +172,7 @@ impl Config {
     ///
     /// This is a security requirement to prevent overly broad global exclusions
     /// that could allow unauthorized access to protected files.
-    fn validate_global_exclusions(&self) -> Result<(), ConfigError> {
+    fn validate_global_exclusions(&self) -> Result<()> {
         for (i, rule) in self.global_exclusions.iter().enumerate() {
             if rule.path.is_none() && rule.team_id.is_none() {
                 let msg = format!(
@@ -223,7 +180,7 @@ impl Config {
                      Every global exclusion must have at least one of these for security.",
                     i + 1
                 );
-                return Err(ConfigError::Validation(msg));
+                return Err(NoSwiperError::Config(ConfigError::Validation(msg)));
             }
         }
         Ok(())
@@ -303,7 +260,10 @@ impl Config {
 
         if debug {
             log::debug!("Checking if path '{}' is in default_base_paths", path_str);
-            log::debug!("Available default_base_paths: {:?}", self.default_base_paths);
+            log::debug!(
+                "Available default_base_paths: {:?}",
+                self.default_base_paths
+            );
         }
 
         for allowed in &self.default_base_paths {
@@ -316,10 +276,8 @@ impl Config {
                             log::debug!("Path '{}' matches pattern '{}'", path_str, expanded);
                         }
                         return true;
-                    } else {
-                        if debug {
-                            log::debug!("Path '{}' does NOT match pattern '{}'", path_str, expanded);
-                        }
+                    } else if debug {
+                        log::debug!("Path '{}' does NOT match pattern '{}'", path_str, expanded);
                     }
                 } else {
                     log::warn!("Invalid glob pattern in default_base_paths: '{}'", expanded);
@@ -331,10 +289,12 @@ impl Config {
                         log::debug!("Path '{}' starts with prefix '{}'", path_str, expanded);
                     }
                     return true;
-                } else {
-                    if debug {
-                        log::debug!("Path '{}' does NOT start with prefix '{}'", path_str, expanded);
-                    }
+                } else if debug {
+                    log::debug!(
+                        "Path '{}' does NOT start with prefix '{}'",
+                        path_str,
+                        expanded
+                    );
                 }
             }
         }

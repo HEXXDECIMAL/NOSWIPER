@@ -23,14 +23,14 @@ pub struct ProcessDetails {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SecurityEvent {
     pub timestamp: DateTime<Utc>,
-    pub event_type: String,  // "allow" or "deny"
-    pub mode: String,         // "monitor" or "enforce"
+    pub event_type: String, // "allow" or "deny"
+    pub mode: String,       // "monitor" or "enforce"
     pub rule_name: Option<String>,
     pub file_path: String,
-    pub access_type: String,  // "open", "exec", etc.
+    pub access_type: String, // "open", "exec", etc.
     pub process: ProcessDetails,
-    pub process_tree: Vec<ProcessDetails>,  // Parent, grandparent, etc.
-    pub action_taken: Option<String>,  // "logged", "blocked", "suspended", etc.
+    pub process_tree: Vec<ProcessDetails>, // Parent, grandparent, etc.
+    pub action_taken: Option<String>,      // "logged", "blocked", "suspended", etc.
 }
 
 /// JSON logger that writes to OS-appropriate locations

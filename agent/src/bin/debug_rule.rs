@@ -31,7 +31,7 @@ fn main() -> Result<()> {
     println!("{}", detection);
 
     // Load config
-    let config = Config::default().context("Failed to load default configuration")?;
+    let config = Config::load_default().context("Failed to load default configuration")?;
 
     // Find matching protected file rule
     let mut found_rule = false;
@@ -120,8 +120,8 @@ impl fmt::Display for DetectionLog {
         writeln!(f, "  Arguments: {}", self.args.join(" "))?;
 
         if let Some(ref team_id) = self.team_id {
-            let display_id = if team_id.starts_with('*') {
-                format!("{} (platform binary)", &team_id[1..])
+            let display_id = if let Some(stripped) = team_id.strip_prefix('*') {
+                format!("{} (platform binary)", stripped)
             } else {
                 team_id.clone()
             };
@@ -232,7 +232,7 @@ fn path_matches(file_path: &Path, pattern: &str) -> bool {
     file_path.starts_with(pattern)
         || glob::Pattern::new(pattern)
             .ok()
-            .map_or(false, |p| p.matches(file_path.to_string_lossy().as_ref()))
+            .is_some_and(|p| p.matches(file_path.to_string_lossy().as_ref()))
 }
 
 /// Evaluate allow rules and return whether access would be allowed
@@ -263,8 +263,8 @@ fn suggest_fixes(detection: &DetectionLog, rule_id: &str) {
 
     if let Some(ref team_id) = detection.team_id {
         // Strip platform binary prefix for the suggestion
-        let clean_id = if team_id.starts_with('*') {
-            &team_id[1..]
+        let clean_id = if let Some(stripped) = team_id.strip_prefix('*') {
+            stripped
         } else {
             team_id.as_str()
         };
@@ -291,7 +291,7 @@ fn suggest_fixes(detection: &DetectionLog, rule_id: &str) {
     if detection
         .team_id
         .as_ref()
-        .map_or(false, |t| t.starts_with('*'))
+        .is_some_and(|t| t.starts_with('*'))
     {
         println!("\n  5. Add platform_binary flag (for Apple system binaries):");
         println!("     allow:");

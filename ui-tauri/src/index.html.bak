@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NoSwiper Security Violation</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #333;
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .container {
+            background: white;
+            border-radius: 12px;
+            padding: 30px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            width: 90%;
+            max-width: 550px;
+        }
+
+        .header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid #f0f0f0;
+        }
+
+        .header-icon {
+            font-size: 32px;
+            margin-right: 15px;
+        }
+
+        .header-text h1 {
+            font-size: 24px;
+            color: #d32f2f;
+            margin-bottom: 5px;
+        }
+
+        .header-text p {
+            font-size: 14px;
+            color: #666;
+        }
+
+        .violation-details {
+            margin: 20px 0;
+        }
+
+        .detail-row {
+            display: flex;
+            margin: 10px 0;
+            font-size: 14px;
+        }
+
+        .detail-label {
+            font-weight: 600;
+            color: #555;
+            min-width: 120px;
+        }
+
+        .detail-value {
+            color: #222;
+            word-break: break-all;
+        }
+
+        .process-tree {
+            background: #f5f5f5;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 20px 0;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 12px;
+            max-height: 150px;
+            overflow-y: auto;
+        }
+
+        .process-tree-title {
+            font-weight: 600;
+            margin-bottom: 10px;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto;
+            font-size: 14px;
+        }
+
+        .tree-entry {
+            margin: 2px 0;
+            white-space: pre;
+        }
+
+        .actions {
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            margin-top: 25px;
+        }
+
+        .btn {
+            flex: 1;
+            padding: 12px 20px;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        }
+
+        .btn-allow {
+            background: #4caf50;
+            color: white;
+        }
+
+        .btn-allow:hover {
+            background: #45a049;
+        }
+
+        .btn-kill {
+            background: #f44336;
+            color: white;
+        }
+
+        .btn-kill:hover {
+            background: #da190b;
+        }
+
+        .btn-whitelist {
+            background: #2196f3;
+            color: white;
+        }
+
+        .btn-whitelist:hover {
+            background: #0b7dda;
+        }
+
+        .btn-dismiss {
+            background: #e0e0e0;
+            color: #333;
+        }
+
+        .btn-dismiss:hover {
+            background: #d0d0d0;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 20px;
+        }
+
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <p style="margin-top: 10px;">Processing...</p>
+        </div>
+
+        <div id="content">
+            <div class="header">
+                <div class="header-icon">🚨</div>
+                <div class="header-text">
+                    <h1>Security Violation Detected</h1>
+                    <p>A process attempted to access protected credentials</p>
+                </div>
+            </div>
+
+            <div class="violation-details">
+                <div class="detail-row">
+                    <span class="detail-label">Process:</span>
+                    <span class="detail-value" id="process-path">Loading...</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">PID:</span>
+                    <span class="detail-value" id="process-pid">-</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">Protected File:</span>
+                    <span class="detail-value" id="file-path">Loading...</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">Rule:</span>
+                    <span class="detail-value" id="rule-name">Loading...</span>
+                </div>
+                <div class="detail-row" id="team-id-row" style="display: none;">
+                    <span class="detail-label">Team ID:</span>
+                    <span class="detail-value" id="team-id">-</span>
+                </div>
+            </div>
+
+            <div class="process-tree">
+                <div class="process-tree-title">Process Hierarchy:</div>
+                <div id="tree-content">
+                    Loading process tree...
+                </div>
+            </div>
+
+            <div class="actions">
+                <button class="btn btn-allow" onclick="handleAction('allow_once')">
+                    ✅ Allow Once
+                </button>
+                <button class="btn btn-kill" onclick="handleAction('kill_process')">
+                    ❌ Kill Process
+                </button>
+                <button class="btn btn-whitelist" onclick="handleAction('allow_permanently')">
+                    ✓ Allow Always
+                </button>
+                <button class="btn btn-dismiss" onclick="handleAction('dismiss')">
+                    Dismiss
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const { invoke } = window.__TAURI__.tauri;
+        const { listen } = window.__TAURI__.event;
+        const { appWindow } = window.__TAURI__.window;
+
+        let currentEventId = null;
+
+        // Listen for violation events
+        listen('violation', (event) => {
+            console.log('Violation received:', event.payload);
+            displayViolation(event.payload);
+        });
+
+        function displayViolation(violation) {
+            currentEventId = violation.event_id;
+
+            // Update violation details
+            document.getElementById('process-path').textContent = violation.process_path;
+            document.getElementById('process-pid').textContent = violation.process_pid;
+            document.getElementById('file-path').textContent = violation.file_path;
+            document.getElementById('rule-name').textContent = violation.rule_name;
+
+            // Show team ID if present
+            if (violation.team_id) {
+                document.getElementById('team-id').textContent = violation.team_id;
+                document.getElementById('team-id-row').style.display = 'flex';
+            }
+
+            // Display process tree
+            if (violation.process_tree && violation.process_tree.length > 0) {
+                let treeHtml = '';
+                violation.process_tree.forEach((entry, index) => {
+                    const indent = '  '.repeat(index);
+                    const arrow = index === 0 ? '▶' : '└─';
+                    treeHtml += `<div class="tree-entry">${indent}${arrow} ${entry.name} (PID: ${entry.pid})</div>`;
+                    if (entry.cmdline && entry.cmdline.length < 100) {
+                        treeHtml += `<div class="tree-entry">${indent}   ${entry.cmdline}</div>`;
+                    }
+                });
+                document.getElementById('tree-content').innerHTML = treeHtml;
+            } else {
+                const processName = violation.process_path.split('/').pop();
+                document.getElementById('tree-content').innerHTML =
+                    `<div class="tree-entry">▶ ${processName} (PID: ${violation.process_pid})</div>`;
+            }
+        }
+
+        async function handleAction(action) {
+            if (!currentEventId && action !== 'dismiss') {
+                console.error('No event ID available');
+                return;
+            }
+
+            // Show loading
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('content').style.display = 'none';
+
+            try {
+                if (action === 'dismiss') {
+                    await appWindow.close();
+                    return;
+                }
+
+                // Call the appropriate Tauri command
+                const response = await invoke(action, { eventId: currentEventId });
+                console.log(`Action ${action} completed:`, response);
+
+                // Close window after successful action
+                setTimeout(() => {
+                    appWindow.close();
+                }, 500);
+            } catch (error) {
+                console.error(`Failed to execute ${action}:`, error);
+                alert(`Failed to execute action: ${error}`);
+
+                // Show content again on error
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('content').style.display = 'block';
+            }
+        }
+
+        // For testing - display mock violation
+        if (!window.__TAURI__) {
+            displayViolation({
+                event_id: 'test-123',
+                rule_name: 'ssh',
+                file_path: '/Users/test/.ssh/id_rsa',
+                process_path: '/bin/cat',
+                process_pid: 12345,
+                process_tree: [
+                    { name: 'cat', pid: 12345 },
+                    { name: 'bash', pid: 12344 },
+                    { name: 'Terminal', pid: 12340 }
+                ]
+            });
+        }
+    </script>
+</body>
+</html>
