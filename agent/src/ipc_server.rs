@@ -103,6 +103,13 @@ pub enum ClientRequest {
     /// Get override rules
     #[serde(rename = "get_overrides")]
     GetOverrides,
+
+    /// Get recent violations from history
+    #[serde(rename = "get_violations")]
+    GetViolations {
+        #[serde(default)]
+        limit: Option<usize>,
+    },
 }
 
 /// Response to client requests
@@ -124,6 +131,9 @@ pub enum ClientResponse {
         events_pending: usize,
         connected_clients: usize,
     },
+
+    #[serde(rename = "violations")]
+    Violations { events: Vec<Event> },
 }
 
 /// Filter for event subscriptions
@@ -707,6 +717,8 @@ impl IpcServer {
             },
 
             ClientRequest::GetOverrides => self.handle_get_overrides().await,
+
+            ClientRequest::GetViolations { limit } => self.handle_get_violations(limit).await,
         }
     }
 
@@ -755,6 +767,23 @@ impl IpcServer {
                 message: format!("Failed to read override rules: {}", e),
             },
         }
+    }
+
+    /// Handle get violations request
+    async fn handle_get_violations(&self, limit: Option<usize>) -> ClientResponse {
+        let history = self.event_history.read().await;
+
+        // Get all events from history
+        let mut events: Vec<Event> = history.values().cloned().collect();
+
+        // Sort by timestamp (most recent first)
+        events.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+
+        // Apply limit if specified (default to 100)
+        let limit = limit.unwrap_or(100).min(1000); // Cap at 1000 events
+        events.truncate(limit);
+
+        ClientResponse::Violations { events }
     }
 
     /// Handle allow once request

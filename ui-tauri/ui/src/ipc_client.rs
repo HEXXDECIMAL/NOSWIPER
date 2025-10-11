@@ -424,12 +424,54 @@ impl IpcClient {
         }
     }
 
-    #[allow(dead_code)] // Will be used for violation history feature
-    pub fn get_violations(&self, _limit: usize) -> Result<Vec<Violation>> {
-        // Subscribe to events and collect violations
-        // For now, we'll need to maintain a separate connection for streaming
-        // This is a temporary implementation until we refactor to use streaming
-        Ok(Vec::new())
+    /// Get recent violations from the daemon
+    pub fn get_violations(&self, limit: Option<usize>) -> Result<Vec<Event>> {
+        let socket_path = Path::new(&self.socket_path);
+
+        if !socket_path.exists() {
+            return Err(anyhow::anyhow!(
+                "Socket does not exist at {}",
+                self.socket_path
+            ));
+        }
+
+        let mut stream =
+            UnixStream::connect(&self.socket_path).context("Failed to connect to agent socket")?;
+
+        stream.set_read_timeout(Some(TIMEOUT))?;
+        stream.set_write_timeout(Some(TIMEOUT))?;
+
+        let mut request = json!({
+            "action": "get_violations"
+        });
+
+        if let Some(limit) = limit {
+            request["limit"] = json!(limit);
+        }
+
+        writeln!(stream, "{}", request)?;
+        stream.flush()?;
+
+        let mut reader = BufReader::new(&stream);
+        let mut response_line = String::new();
+        reader.read_line(&mut response_line)?;
+
+        let response: serde_json::Value = serde_json::from_str(&response_line)?;
+
+        if response["status"] == "violations" {
+            if let Some(events) = response["events"].as_array() {
+                let violations: Vec<Event> = events
+                    .iter()
+                    .filter_map(|e| serde_json::from_value(e.clone()).ok())
+                    .collect();
+                Ok(violations)
+            } else {
+                Ok(Vec::new())
+            }
+        } else {
+            let error_msg = response["message"].as_str().unwrap_or("Unknown error");
+            Err(anyhow::anyhow!("Failed to get violations: {}", error_msg))
+        }
     }
 
     /// Subscribe to events and return a stream reader

@@ -127,7 +127,7 @@ protected_files:
         euid: 501-65533
       - base: "fzf"
         euid: 501-65533
-      - base: "tail"  # For reading last commands
+      - base: "tail" # For reading last commands
         euid: 501-65533
       - base: "head"
         euid: 501-65533
@@ -225,7 +225,7 @@ protected_files:
       # Serverless Framework
       - base: "serverless"
         euid: 501-65533
-      - base: "sls"  # serverless shorthand
+      - base: "sls" # serverless shorthand
         euid: 501-65533
       # Node.js (for AWS SDK)
       - base: "node"
@@ -412,6 +412,10 @@ protected_files:
         euid: 501-65533
       - base: "ko"
         euid: 501-65533
+      - path: "/usr/bin/grep"
+        euid: 501-65533
+      - path: "/bin/grep"
+        euid: 501-65533
       # gcloud auth configure-docker uses Python to modify docker config
       - base: "Python"
         path: "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/*/Resources/Python.app/Contents/MacOS/Python"
@@ -562,7 +566,7 @@ protected_files:
       - "/usr/local/etc/npmrc"
     allow:
       - base: "npm"
-        euid: 0-65533  # All users can read global npm config
+        euid: 0-65533 # All users can read global npm config
       - base: "node"
         euid: 0-65533
       - base: "npx"
