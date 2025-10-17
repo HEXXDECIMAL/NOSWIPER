@@ -10,48 +10,42 @@ NoSwiper monitors access to sensitive credential files (SSH keys, cloud provider
 
 ## How It Works
 
-NoSwiper uses OS-level file monitoring to detect when programs try to access your credentials:
-- **macOS**: Endpoint Security Framework (via `eslogger`)
-- **Linux**: `fanotify` or eBPF
-
-When unauthorized access is detected, NoSwiper can log it, block it, or prompt you to decide.
+Uses OS-level monitoring (**macOS**: ESF via `eslogger`, **Linux**: `fanotify`/eBPF) to detect credential access. Can log, block, or prompt for decisions.
 
 ## Quick Start
 
 ```bash
-# Build
 cargo build --release
 
-# Monitor mode (log only, safe for testing)
+# Run in monitor mode (safe for testing)
 sudo ./target/release/noswiper-agent --monitor
 
-# Interactive mode (prompts via CLI)
+# Or interactive mode (CLI prompts) or enforce mode (blocks)
 sudo ./target/release/noswiper-agent --interactive
-
-# Enforce mode (blocks unauthorized access)
 sudo ./target/release/noswiper-agent --enforce
+```
+
+## User Interface
+
+**macOS Native UI** (Recommended): Swift/SwiftUI menu bar app with real-time alerts
+**Tauri UI** (Cross-platform): Web-based UI for macOS/Linux/Windows
+**CLI Mode**: Use `--interactive` flag for terminal-based prompts
+
+```bash
+# macOS Native UI
+make build-ui-macos && open ui/macos/build/NoSwiper.app
+
+# Tauri UI
+cd ui-tauri && npm install && npm run tauri build
 ```
 
 ## What It Protects
 
-By default, NoSwiper protects:
-- SSH keys (`~/.ssh/`)
-- AWS credentials (`~/.aws/`)
-- GCP credentials (`~/.config/gcloud/`)
-- GitHub tokens (`~/.config/gh/`)
-- Browser password stores
-- GPG keys
+SSH keys, AWS/GCP/Azure credentials, GitHub tokens, browser password stores, GPG keys, and more.
 
 ## Configuration
 
-NoSwiper works out of the box with sensible defaults. To customize, create `~/.config/noswiper/config.yaml`.
-
-## Security Model
-
-- Runs as root to intercept file access
-- Fails closed (denies when uncertain)
-- Logs all security events to system logs
-- Admin users can control the daemon
+Works out of the box with sensible defaults. Customize with `~/.config/noswiper/config.yaml`.
 
 ## License
 
