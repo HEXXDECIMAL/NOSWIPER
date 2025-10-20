@@ -195,15 +195,17 @@ sudo ./target/release/noswiper-agent --monitor --mechanism fanotify  # Linux
 
 NoSwiper provides three UI options for different use cases:
 
-### 1. macOS Native UI (Recommended for macOS)
+### 1. Swift UI (Recommended for macOS Users)
 
-A native Swift/SwiftUI menu bar application with real-time violation alerts.
+A native Swift/SwiftUI menu bar application with real-time violation alerts and comprehensive security information display.
 
 **Features:**
 - Lives in macOS menu bar (doesn't clutter Dock)
 - Native alert dialogs using SF Symbols
-- Shows process hierarchy for access attempts
+- **Detailed process hierarchy** with color-coded code signing information
+- **Violation history window** showing recent credential access attempts
 - Toggle between Monitor and Enforce modes
+- View override rules (permanently allowed processes)
 - Auto-reconnects to daemon
 - ~2MB bundle, ~15MB memory footprint
 
@@ -211,11 +213,11 @@ A native Swift/SwiftUI menu bar application with real-time violation alerts.
 
 ```bash
 # Build and run using Make (from project root)
-make build-ui-macos
-make run-ui-macos
+make swift-ui
+make run-swift-ui
 
 # Or build directly
-cd ui/macos
+cd ui/swift
 ./build.sh Release
 open build/NoSwiper.app
 ```
@@ -229,22 +231,33 @@ open build/NoSwiper.app
 sudo make enforce  # or sudo make monitor
 ```
 
-Then launch the UI app. See `ui/macos/README.md` for detailed documentation.
+Then launch the UI app. See `ui/swift/README.md` for detailed documentation.
 
-### 2. Tauri UI (Cross-platform, Legacy)
+### 2. Rust UI (Cross-Platform Alternative)
 
-Web-based UI using Rust + Tauri for macOS/Linux/Windows support.
+Web-based UI using Rust + Tauri, supporting macOS, Linux, and BSD systems.
+
+**Features:**
+- Works on multiple platforms (macOS, Linux, FreeBSD)
+- Process tree with signing information
+- HTML/CSS-based styling
+- Good for non-macOS systems
 
 **Building and Running:**
 
 ```bash
-cd ui-tauri
+# Build and run using Make (from project root)
+make ui
+make run-ui
+
+# Or build directly
+cd ui/rust
 npm install
 npm run tauri dev      # Development mode
 npm run tauri build    # Production build
 ```
 
-**Note:** The macOS native UI is now the preferred option for macOS users. Tauri remains available for cross-platform scenarios or if you prefer web technologies.
+**Note:** We recommend the Swift UI for macOS users due to better native integration and additional features like violation history. The Rust UI is ideal for Linux/BSD users or cross-platform deployments.
 
 ### 3. CLI Mode
 
@@ -343,9 +356,9 @@ cargo build
 cargo build --release
 
 # Build using Make
-make build        # Agent + macOS UI (debug)
-make release      # Agent + macOS UI (release)
-make build-agent  # Agent only
+make build    # Agent + Swift UI (debug)
+make release  # Agent + Swift UI (release)
+make agent    # Agent only
 ```
 
 ### Testing

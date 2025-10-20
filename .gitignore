@@ -24,5 +24,6 @@ out/
 dist/
 
 build/
-ui/macos/build/
+ui/swift/build/
+ui/rust/target/
 
