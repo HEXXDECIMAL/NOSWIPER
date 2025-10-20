@@ -45,6 +45,14 @@ struct ProcessTreeEntry: Codable {
     let name: String
     let path: String
     let cmdline: String?
+    let teamId: String?
+    let signingId: String?
+
+    enum CodingKeys: String, CodingKey {
+        case pid, ppid, name, path, cmdline
+        case teamId = "team_id"
+        case signingId = "signing_id"
+    }
 }
 
 struct ClientResponse: Codable {

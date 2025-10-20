@@ -70,9 +70,10 @@ class MenuBarController: NSObject, NSMenuDelegate {
             menu.addItem(NSMenuItem.separator())
         }
 
-        // View Recent Violations
+        // View Recent Violations (now enabled!)
         let violationsItem = NSMenuItem(title: "Recent Violations…", action: #selector(showViolations), keyEquivalent: "")
         violationsItem.target = self
+        violationsItem.isEnabled = true
         menu.addItem(violationsItem)
 
         // View Override Rules

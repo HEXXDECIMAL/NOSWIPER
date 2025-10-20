@@ -110,16 +110,18 @@ struct ViolationAlert {
         textView.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .regular)
         textView.autoresizingMask = [.width]
 
-        var treeText = "Process Hierarchy:\n"
+        // Use attributed string for colored signing information
+        let attributedText = NSMutableAttributedString()
+        let baseAttributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedSystemFont(ofSize: 10, weight: .regular),
+            .foregroundColor: NSColor.textColor
+        ]
+
+        attributedText.append(NSAttributedString(string: "Process Hierarchy:\n", attributes: baseAttributes))
 
         // Find current process entry
         if let current = tree.first(where: { $0.pid == currentPid }) {
-            treeText += "├─ \(current.name) (PID: \(current.pid))\n"
-            treeText += "   \(current.path)\n"
-            if let cmdline = current.cmdline, !cmdline.isEmpty {
-                let truncated = cmdline.count > 80 ? String(cmdline.prefix(80)) + "..." : cmdline
-                treeText += "   \(truncated)\n"
-            }
+            appendProcessEntry(to: attributedText, entry: current, indent: "", marker: "├─", baseAttributes: baseAttributes)
         }
 
         // Find ancestors
@@ -128,12 +130,7 @@ struct ViolationAlert {
         while let parent = tree.first(where: { $0.pid == currentPid })?.ppid {
             if let parentEntry = tree.first(where: { $0.pid == parent }) {
                 let indent = String(repeating: "│  ", count: depth)
-                treeText += "\(indent)└─ \(parentEntry.name) (PID: \(parentEntry.pid))\n"
-                treeText += "\(indent)   \(parentEntry.path)\n"
-                if let cmdline = parentEntry.cmdline, !cmdline.isEmpty {
-                    let truncated = cmdline.count > 80 ? String(cmdline.prefix(80)) + "..." : cmdline
-                    treeText += "\(indent)   \(truncated)\n"
-                }
+                appendProcessEntry(to: attributedText, entry: parentEntry, indent: indent, marker: "└─", baseAttributes: baseAttributes)
                 currentPid = parent
                 depth += 1
             } else {
@@ -143,10 +140,41 @@ struct ViolationAlert {
             if depth > 10 { break } // Prevent infinite loops
         }
 
-        textView.string = treeText
+        textView.textStorage?.setAttributedString(attributedText)
         scrollView.documentView = textView
 
         return scrollView
+    }
+
+    private static func appendProcessEntry(to attributedText: NSMutableAttributedString, entry: ProcessTreeEntry, indent: String, marker: String, baseAttributes: [NSAttributedString.Key: Any]) {
+        // Process name and PID
+        attributedText.append(NSAttributedString(string: "\(indent)\(marker) \(entry.name) (PID: \(entry.pid))", attributes: baseAttributes))
+
+        // Add signing information with color coding (like Tauri UI)
+        if let teamId = entry.teamId, !teamId.isEmpty {
+            let signingAttributes: [NSAttributedString.Key: Any] = [
+                .font: NSFont.monospacedSystemFont(ofSize: 10, weight: .medium),
+                .foregroundColor: NSColor.systemBlue
+            ]
+            attributedText.append(NSAttributedString(string: " [\(teamId)]", attributes: signingAttributes))
+        } else if let signingId = entry.signingId, !signingId.isEmpty {
+            let signingAttributes: [NSAttributedString.Key: Any] = [
+                .font: NSFont.monospacedSystemFont(ofSize: 10, weight: .medium),
+                .foregroundColor: NSColor.systemPurple
+            ]
+            attributedText.append(NSAttributedString(string: " [\(signingId)]", attributes: signingAttributes))
+        }
+
+        attributedText.append(NSAttributedString(string: "\n", attributes: baseAttributes))
+
+        // Path
+        attributedText.append(NSAttributedString(string: "\(indent)   \(entry.path)\n", attributes: baseAttributes))
+
+        // Command line if available
+        if let cmdline = entry.cmdline, !cmdline.isEmpty {
+            let truncated = cmdline.count > 80 ? String(cmdline.prefix(80)) + "..." : cmdline
+            attributedText.append(NSAttributedString(string: "\(indent)   \(truncated)\n", attributes: baseAttributes))
+        }
     }
 
     private static func currentProcessName(from tree: [ProcessTreeEntry], pid: UInt32) -> String {
